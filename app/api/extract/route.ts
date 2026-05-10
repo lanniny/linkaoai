@@ -92,7 +92,15 @@ export async function POST(req: NextRequest) {
     const response = await anthropic.messages.create({
       model: MODELS.primary,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      // Prompt caching: SYSTEM_PROMPT is constant across requests, so we cache it.
+      // 5-minute TTL → repeat extracts within the window only pay 0.1× input cost.
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [
         {
           role: "user",
@@ -104,6 +112,9 @@ export async function POST(req: NextRequest) {
                 media_type: "application/pdf",
                 data: base64,
               },
+              // Also cache the document if it's the same PDF on retry — saves
+              // a re-upload of the binary tokens. Costs nothing if PDF differs.
+              cache_control: { type: "ephemeral" },
             },
             {
               type: "text",
