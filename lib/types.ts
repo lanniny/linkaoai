@@ -75,3 +75,31 @@ export const generateQuestionsRequestSchema = z.object({
 export type GenerateQuestionsRequest = z.infer<
   typeof generateQuestionsRequestSchema
 >;
+
+// ============================================================
+// Grading (Day 4)
+// ============================================================
+
+// 错误分类标签（与批改 prompt 中的固定词表对齐；UI 后续可按 tag 聚合薄弱点）
+export const errorTagSchema = z.string().min(1).max(40);
+
+export const gradeRequestSchema = z.object({
+  question: generatedQuestionSchema,
+  user_answer: z.string().max(5000), // 允许空字符串（学生没作答）
+  // 可选元信息：用时等；目前不影响判定，仅作为未来 attempt 行的辅助字段
+  attempt_meta: z
+    .object({
+      duration_seconds: z.number().int().min(0).max(86400).optional(),
+    })
+    .optional(),
+});
+export type GradeRequest = z.infer<typeof gradeRequestSchema>;
+
+export const gradeResultSchema = z.object({
+  is_correct: z.boolean(),
+  ai_score: z.number().min(0).max(100),
+  ai_feedback: z.string().min(1).max(3000),
+  error_tags: z.array(errorTagSchema).max(8).optional(),
+  next_step_hint: z.string().min(1).max(500).optional(),
+});
+export type GradeResult = z.infer<typeof gradeResultSchema>;
