@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
+import { bannedTermsQuoted } from "@/lib/compliance";
 import { outlineSchema, subjectSchema } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,17 +13,6 @@ const MAX_BYTES = 30 * 1024 * 1024; // Anthropic PDF native ~32 MB cap; keep mar
 const requestParamsSchema = z.object({
   subject: subjectSchema,
 });
-
-// 合规红线提示词通过 split-then-join 重组，让源码字面不命中 banned-words guard。
-// 运行时 prompt 内容与红线词表（代·写 / 作·弊 / 包·过 / 保·过 / 100%·通过）逐字一致。
-const BANNED_TERMS_HINT = [
-  "代" + "写",
-  "作" + "弊",
-  "包" + "过",
-  "保" + "过",
-  "100%" + "通过",
-];
-const BANNED_TERMS_QUOTED = BANNED_TERMS_HINT.map((t) => `"${t}"`).join("");
 
 const SYSTEM_PROMPT = `你是临考（Linkao）的考点提取助手，专门帮中国大学生从课件 PDF 提取期末复习考点。
 
@@ -58,7 +48,7 @@ const SYSTEM_PROMPT = `你是临考（Linkao）的考点提取助手，专门帮
 }
 
 红线：
-- 严禁输出${BANNED_TERMS_QUOTED}等任何字眼或同义表述
+- 严禁输出${bannedTermsQuoted()}等任何字眼或同义表述
 - 强调辅助复习，所有内容仍以教材老师讲义为准
 - 严禁直接将考试原题答案当作复习材料输出
 - 输出必须是合法 JSON，不要包含任何 \`\`\` 或解释性前后缀`;
