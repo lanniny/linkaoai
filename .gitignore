@@ -45,6 +45,13 @@ next-env.d.ts
 /outputs/runtime/
 /.vibeskills/
 
+# Claude Code local workspace (plans, intelligence, agent state)
+/.claude/
+
+# Scratch / probe outputs from manual testing — never commit
+.tmp-*
+/.tmp/
+
 # OS / editor
 Thumbs.db
 .idea/
