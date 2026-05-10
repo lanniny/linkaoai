@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import katex from "katex";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DifficultyFocus,
   GeneratedQuestion,
@@ -35,26 +36,58 @@ const DIFFICULTY_LABEL: Record<DifficultyFocus, string> = {
 const DIFFICULTY_DOTS = (n: number) =>
   "●".repeat(n) + "○".repeat(Math.max(0, 5 - n));
 
-// LaTeX 暂未接 KaTeX 渲染：把 $...$ / $$...$$ 段落用等宽字体的 inline span 显出来。
-// 后续接 KaTeX 后此函数替换为 <KaTeX inline={...}>。
+// 把 $...$ / $$...$$ 切片后分别用 KaTeX 行内 / 块级渲染；invalid LaTeX 时 fallback
+// 显示原文（throwOnError: false），不打断整个题目阅读流。
 function LatexAware({ text }: { text: string }) {
   const parts = useMemo(() => splitLatex(text), [text]);
   return (
     <span className="whitespace-pre-wrap">
-      {parts.map((p, i) =>
-        p.kind === "math" ? (
-          <code
-            key={i}
-            className="mx-0.5 rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.92em] text-zinc-800"
-          >
-            {p.text}
-          </code>
+      {parts.map((p, i) => {
+        if (p.kind !== "math") return <span key={i}>{p.text}</span>;
+        const isBlock = p.text.startsWith("$$");
+        const inner = isBlock ? p.text.slice(2, -2) : p.text.slice(1, -1);
+        return isBlock ? (
+          <KatexBlock key={i} tex={inner} />
         ) : (
-          <span key={i}>{p.text}</span>
-        ),
-      )}
+          <KatexInline key={i} tex={inner} />
+        );
+      })}
     </span>
   );
+}
+
+function KatexInline({ tex }: { tex: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    try {
+      katex.render(tex, ref.current, {
+        displayMode: false,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch {
+      ref.current.textContent = `$${tex}$`;
+    }
+  }, [tex]);
+  return <span ref={ref} className="mx-0.5 inline-block align-middle" />;
+}
+
+function KatexBlock({ tex }: { tex: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    try {
+      katex.render(tex, ref.current, {
+        displayMode: true,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch {
+      ref.current.textContent = `$$${tex}$$`;
+    }
+  }, [tex]);
+  return <div ref={ref} className="my-2 overflow-x-auto" />;
 }
 
 function splitLatex(s: string): { kind: "text" | "math"; text: string }[] {

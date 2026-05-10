@@ -1,4 +1,5 @@
 @import "tailwindcss";
+/* katex CSS imported in app/layout.tsx (Tailwind v4 swallows nested @import) */
 
 :root {
   --background: #ffffff;
