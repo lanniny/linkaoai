@@ -1,6 +1,7 @@
 "use client";
 
 import katex from "katex";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
@@ -415,12 +416,18 @@ export default function HomePage() {
           <div className="flex items-center gap-2 text-xs">
             {sessionUser ? (
               <>
-                <a
+                <Link
+                  href="/dashboard"
+                  className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  📊 总览
+                </Link>
+                <Link
                   href="/history"
                   className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
                   📚 历史
-                </a>
+                </Link>
                 <span className="hidden text-zinc-500 sm:inline">
                   {sessionUser.email}
                 </span>
@@ -434,19 +441,19 @@ export default function HomePage() {
                 </form>
               </>
             ) : (
-              <a
+              <Link
                 href="/login"
                 className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
                 登录 / 注册
-              </a>
+              </Link>
             )}
-            <a
+            <Link
               href="/pay"
               className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-medium text-amber-800 transition hover:bg-amber-100"
             >
               💰 19.9 / 科 →
-            </a>
+            </Link>
           </div>
         </div>
         <p className="text-zinc-600">
