@@ -2,6 +2,7 @@
 
 import katex from "katex";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   DifficultyFocus,
   GeneratedQuestion,
@@ -13,6 +14,8 @@ import type {
   SprintPlan,
   Subject,
 } from "@/lib/types";
+
+type SessionUser = { id: string; email: string | undefined };
 
 const SUBJECTS: Subject[] = ["高数", "线代", "概率论"];
 
@@ -137,6 +140,36 @@ export default function HomePage() {
   const [grades, setGrades] = useState<Record<string, GradeResult>>({});
   const [gradeLoading, setGradeLoading] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
+
+  // ----- Auth session (lit up only when Supabase is configured) -----
+  const supabaseConfigured =
+    typeof process.env.NEXT_PUBLIC_SUPABASE_URL === "string" &&
+    process.env.NEXT_PUBLIC_SUPABASE_URL.length > 0;
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+
+  useEffect(() => {
+    if (!supabaseConfigured) return;
+    const supabase = createSupabaseBrowserClient();
+    let mounted = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (mounted && data.user)
+        setSessionUser({ id: data.user.id, email: data.user.email });
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setSessionUser(
+        session?.user
+          ? { id: session.user.id, email: session.user.email }
+          : null,
+      );
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabaseConfigured]);
 
   // ----- Mock exam mode: presets generate-questions controls + integrated report at end -----
   const [mockExamMode, setMockExamMode] = useState(false);
@@ -341,12 +374,42 @@ export default function HomePage() {
       <header className="space-y-2">
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-3xl font-bold">临考</h1>
-          <a
-            href="/pay"
-            className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
-          >
-            💰 19.9 / 科 · 挂科退款 →
-          </a>
+          <div className="flex items-center gap-2 text-xs">
+            {sessionUser ? (
+              <>
+                <a
+                  href="/history"
+                  className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  📚 历史
+                </a>
+                <span className="hidden text-zinc-500 sm:inline">
+                  {sessionUser.email}
+                </span>
+                <form action="/auth/signout" method="post" className="inline">
+                  <button
+                    type="submit"
+                    className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-600 transition hover:bg-zinc-50"
+                  >
+                    退出
+                  </button>
+                </form>
+              </>
+            ) : (
+              <a
+                href="/login"
+                className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                登录 / 注册
+              </a>
+            )}
+            <a
+              href="/pay"
+              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-medium text-amber-800 transition hover:bg-amber-100"
+            >
+              💰 19.9 / 科 →
+            </a>
+          </div>
         </div>
         <p className="text-zinc-600">
           AI 期末冲刺 · 高数 / 线代 / 概率论
