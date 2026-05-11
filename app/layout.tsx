@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
@@ -33,6 +34,17 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900">
         {children}
+        <Toaster
+          position="top-right"
+          theme="light"
+          richColors
+          closeButton
+          toastOptions={{
+            style: {
+              fontSize: "13px",
+            },
+          }}
+        />
       </body>
     </html>
   );

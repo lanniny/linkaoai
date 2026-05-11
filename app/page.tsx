@@ -1,8 +1,21 @@
 "use client";
 
 import katex from "katex";
+import {
+  BookOpen,
+  GraduationCap,
+  LogOut,
+  Sparkles,
+  User,
+  Wallet,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import FeaturesGrid from "@/app/components/marketing/FeaturesGrid";
+import Footer from "@/app/components/marketing/Footer";
+import Hero from "@/app/components/marketing/Hero";
+import PricingCard from "@/app/components/marketing/PricingCard";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   DifficultyFocus,
@@ -268,7 +281,9 @@ export default function HomePage() {
         ),
       );
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "未知错误");
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setUploadError(msg);
+      toast.error("PDF 提取失败", { description: msg });
     } finally {
       setUploadLoading(false);
     }
@@ -317,7 +332,9 @@ export default function HomePage() {
         setPersistedQuestionIdMap({});
       }
     } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "未知错误");
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setGenerateError(msg);
+      toast.error("出题失败", { description: msg });
     } finally {
       setGenerateLoading(false);
     }
@@ -349,7 +366,9 @@ export default function HomePage() {
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
       setSprintPlan(data.plan as SprintPlan);
     } catch (err) {
-      setSprintError(err instanceof Error ? err.message : "未知错误");
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setSprintError(msg);
+      toast.error("冲刺计划生成失败", { description: msg });
     } finally {
       setSprintLoading(false);
     }
@@ -375,7 +394,9 @@ export default function HomePage() {
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
       setGrades((prev) => ({ ...prev, [q.id]: data.grade as GradeResult }));
     } catch (err) {
-      setGradeError(err instanceof Error ? err.message : "未知错误");
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setGradeError(msg);
+      toast.error("批改失败", { description: msg });
     } finally {
       setGradeLoading(false);
     }
@@ -409,60 +430,86 @@ export default function HomePage() {
     questions.length > 0 && questions.every((q) => grades[q.id]);
 
   return (
-    <main className="mx-auto max-w-3xl space-y-8 p-6">
-      <header className="space-y-2">
-        <div className="flex items-baseline justify-between gap-3">
-          <h1 className="text-3xl font-bold">临考</h1>
+    <>
+      {/* Floating header */}
+      <header className="sticky top-0 z-30 border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-6 py-3">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 text-white">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <span className="text-base font-bold tracking-tight">临考</span>
+          </Link>
           <div className="flex items-center gap-2 text-xs">
             {sessionUser ? (
               <>
                 <Link
                   href="/dashboard"
-                  className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+                  className="hidden items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-50 sm:inline-flex"
                 >
-                  📊 总览
+                  <GraduationCap className="h-3.5 w-3.5" />
+                  总览
                 </Link>
                 <Link
                   href="/history"
-                  className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+                  className="hidden items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-50 sm:inline-flex"
                 >
-                  📚 历史
+                  <BookOpen className="h-3.5 w-3.5" />
+                  历史
                 </Link>
-                <span className="hidden text-zinc-500 sm:inline">
+                <span className="hidden items-center gap-1 text-zinc-500 lg:inline-flex">
+                  <User className="h-3 w-3" />
                   {sessionUser.email}
                 </span>
                 <form action="/auth/signout" method="post" className="inline">
                   <button
                     type="submit"
-                    className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-600 transition hover:bg-zinc-50"
+                    title="退出"
+                    className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1.5 font-medium text-zinc-600 transition hover:bg-zinc-50"
                   >
-                    退出
+                    <LogOut className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">退出</span>
                   </button>
                 </form>
               </>
             ) : (
               <Link
                 href="/login"
-                className="rounded-full border border-zinc-300 bg-white px-3 py-1 font-medium text-zinc-700 transition hover:bg-zinc-50"
+                className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
-                登录 / 注册
+                <User className="h-3.5 w-3.5" />
+                登录
               </Link>
             )}
             <Link
               href="/pay"
-              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-medium text-amber-800 transition hover:bg-amber-100"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 font-medium text-amber-800 transition hover:bg-amber-100"
             >
-              💰 19.9 / 科 →
+              <Wallet className="h-3.5 w-3.5" />
+              <span>19.9 / 科</span>
             </Link>
           </div>
         </div>
-        <p className="text-zinc-600">
-          AI 期末冲刺 · 高数 / 线代 / 概率论
-        </p>
-        <p className="text-xs text-zinc-400">
-          AI 生成内容仅供参考，请以教材 / 老师讲义为准
-        </p>
       </header>
+
+      {/* Marketing — visible to everyone, anchored before workspace */}
+      <Hero />
+      <FeaturesGrid />
+      <PricingCard />
+
+      <main
+        id="workspace"
+        className="mx-auto max-w-3xl scroll-mt-16 space-y-8 p-6"
+      >
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold">工作区</h2>
+          <p className="text-xs text-zinc-500">
+            上传 PDF → 选考点 → 出题 / 排计划 ·
+            {sessionUser
+              ? " 登录中，操作会自动保存到历史"
+              : " 当前未登录，操作不会保存（登录后自动同步）"}
+          </p>
+        </div>
 
       {/* =========================== Step 1: upload =========================== */}
       <section
@@ -904,10 +951,9 @@ export default function HomePage() {
         </section>
       )}
 
-      <footer className="border-t pt-6 text-center text-xs text-zinc-400">
-        临考 · linkaoai.com · MVP Day 5
-      </footer>
-    </main>
+      </main>
+      <Footer />
+    </>
   );
 }
 
