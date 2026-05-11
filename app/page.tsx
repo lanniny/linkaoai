@@ -138,6 +138,22 @@ export default function HomePage() {
   const [gradeLoading, setGradeLoading] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
 
+  // ----- Mock exam mode: presets generate-questions controls + integrated report at end -----
+  const [mockExamMode, setMockExamMode] = useState(false);
+
+  function toggleMockMode() {
+    const next = !mockExamMode;
+    setMockExamMode(next);
+    if (next) {
+      // sync the visible controls so user sees what mock mode just configured
+      setQuestionCount(12);
+      setChosenQtypes(
+        new Set(["multiple_choice", "fill_blank", "calculation", "proof"]),
+      );
+      setDifficultyFocus("balanced");
+    }
+  }
+
   const currentQ = questions[currentIdx];
   const currentGrade = currentQ ? grades[currentQ.id] : undefined;
 
@@ -465,6 +481,24 @@ export default function HomePage() {
           </ul>
 
           <div className="space-y-3 border-t pt-4">
+            {/* Mock exam preset toggle */}
+            <div className="flex items-center justify-between gap-3 rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs">
+              <span className="font-medium text-purple-900">
+                🎯 完整模拟卷模式 · 12 题 / 全题型 / 均衡难度 / 答完看整卷报告
+              </span>
+              <button
+                type="button"
+                onClick={toggleMockMode}
+                className={`shrink-0 rounded border px-3 py-1 font-medium transition ${
+                  mockExamMode
+                    ? "border-purple-700 bg-purple-700 text-white"
+                    : "border-purple-300 bg-white text-purple-700 hover:bg-purple-100"
+                }`}
+              >
+                {mockExamMode ? "✓ 已开启" : "开启"}
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="block text-xs font-medium text-zinc-600">
@@ -538,7 +572,9 @@ export default function HomePage() {
             >
               {generateLoading
                 ? "生成中…（约 10-20 秒）"
-                : `基于选中考点出 ${questionCount} 题`}
+                : mockExamMode
+                  ? `生成模拟卷（${questionCount} 题）`
+                  : `基于选中考点出 ${questionCount} 题`}
             </button>
             {generateError && (
               <p className="text-sm text-red-600">⚠️ {generateError}</p>
@@ -741,11 +777,13 @@ export default function HomePage() {
             </button>
           </div>
 
-          {allGraded && (
-            <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-              🎉 全部 {questions.length} 题已批改。建议先复盘错题，再回到 Step
-              2 重新选考点出新题。
-            </div>
+          {allGraded && outline && (
+            <MockExamReport
+              questions={questions}
+              grades={grades}
+              outline={outline}
+              isMockMode={mockExamMode}
+            />
           )}
         </section>
       )}
@@ -829,6 +867,187 @@ function KpRow({
         </div>
       </label>
     </li>
+  );
+}
+
+function MockExamReport({
+  questions,
+  grades,
+  outline,
+  isMockMode,
+}: {
+  questions: GeneratedQuestion[];
+  grades: Record<string, GradeResult>;
+  outline: Outline;
+  isMockMode: boolean;
+}) {
+  // ----- aggregate stats -----
+  const total = questions.length;
+  const allGrades = questions.map((q) => grades[q.id]).filter(Boolean);
+  const correctCount = allGrades.filter((g) => g.is_correct).length;
+  const avgScore =
+    allGrades.length > 0
+      ? allGrades.reduce((s, g) => s + g.ai_score, 0) / allGrades.length
+      : 0;
+
+  // group by knowledge-point level (必考 / 重点 / 了解) via outline lookup
+  const kpLevel: Record<string, string> = {};
+  for (const t of outline.topics) kpLevel[t.id] = t.level;
+  type Bucket = { sum: number; count: number; correct: number };
+  const byLevel: Record<string, Bucket> = {
+    必考: { sum: 0, count: 0, correct: 0 },
+    重点: { sum: 0, count: 0, correct: 0 },
+    了解: { sum: 0, count: 0, correct: 0 },
+    "(其他)": { sum: 0, count: 0, correct: 0 },
+  };
+  for (const q of questions) {
+    const g = grades[q.id];
+    if (!g) continue;
+    const lvl =
+      (q.knowledge_point_id && kpLevel[q.knowledge_point_id]) || "(其他)";
+    const b = byLevel[lvl] ?? byLevel["(其他)"];
+    b.sum += g.ai_score;
+    b.count += 1;
+    if (g.is_correct) b.correct += 1;
+  }
+
+  // error tag frequency (top 5)
+  const tagFreq: Record<string, number> = {};
+  for (const g of allGrades) {
+    for (const tag of g.error_tags ?? []) {
+      tagFreq[tag] = (tagFreq[tag] ?? 0) + 1;
+    }
+  }
+  const topTags = Object.entries(tagFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  // wrong question shortlist
+  const wrongs = questions
+    .map((q, i) => ({ q, i, g: grades[q.id] }))
+    .filter((x) => x.g && !x.g.is_correct);
+
+  const scoreColor =
+    avgScore >= 80
+      ? "text-emerald-700"
+      : avgScore >= 60
+        ? "text-amber-700"
+        : "text-red-700";
+
+  return (
+    <div className="space-y-4 rounded border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-base font-semibold">
+          {isMockMode ? "📋 模拟卷报告" : "🎉 练习总结"}
+        </h3>
+        <div>
+          <span className={`text-3xl font-bold ${scoreColor}`}>
+            {avgScore.toFixed(1)}
+          </span>
+          <span className="ml-1 text-xs text-zinc-500">/100</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+        <div className="rounded bg-white p-2">
+          <div className="text-zinc-500">题数</div>
+          <div className="text-lg font-semibold">{total}</div>
+        </div>
+        <div className="rounded bg-white p-2">
+          <div className="text-zinc-500">答对</div>
+          <div className="text-lg font-semibold text-emerald-700">
+            {correctCount}
+          </div>
+        </div>
+        <div className="rounded bg-white p-2">
+          <div className="text-zinc-500">正确率</div>
+          <div className="text-lg font-semibold">
+            {total > 0 ? Math.round((correctCount / total) * 100) : 0}%
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded bg-white p-3">
+        <div className="text-xs font-medium text-zinc-700">
+          📊 按考点等级分布
+        </div>
+        <ul className="mt-2 space-y-1 text-xs">
+          {(Object.keys(byLevel) as (keyof typeof byLevel)[])
+            .filter((lvl) => byLevel[lvl].count > 0)
+            .map((lvl) => {
+              const b = byLevel[lvl];
+              const avg = b.count > 0 ? b.sum / b.count : 0;
+              return (
+                <li key={lvl} className="flex items-baseline gap-2">
+                  <span
+                    className={`shrink-0 rounded border px-1.5 py-0.5 ${
+                      LEVEL_STYLES[lvl] ?? ""
+                    }`}
+                  >
+                    {lvl}
+                  </span>
+                  <span className="text-zinc-600">
+                    {b.correct}/{b.count} 题 · 平均{" "}
+                    <span className="font-medium">{avg.toFixed(1)}</span>
+                  </span>
+                </li>
+              );
+            })}
+        </ul>
+      </div>
+
+      {topTags.length > 0 && (
+        <div className="rounded bg-white p-3">
+          <div className="text-xs font-medium text-zinc-700">
+            🔥 高频错误类型
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {topTags.map(([tag, count]) => (
+              <span
+                key={tag}
+                className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700"
+              >
+                {tag} × {count}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {wrongs.length > 0 && (
+        <div className="rounded bg-white p-3">
+          <div className="text-xs font-medium text-zinc-700">
+            ❌ 错题清单（{wrongs.length} 道）
+          </div>
+          <ul className="mt-2 space-y-1 text-xs">
+            {wrongs.slice(0, 8).map(({ q, i, g }) => (
+              <li key={q.id} className="flex items-baseline gap-2">
+                <span className="font-mono text-[10px] text-zinc-400">
+                  Q{i + 1}
+                </span>
+                <span className="text-zinc-700">
+                  {q.prompt.slice(0, 60)}
+                  {q.prompt.length > 60 ? "…" : ""}
+                </span>
+                <span className="ml-auto shrink-0 text-zinc-500">
+                  {g!.ai_score}
+                </span>
+              </li>
+            ))}
+            {wrongs.length > 8 && (
+              <li className="text-zinc-400">
+                …还有 {wrongs.length - 8} 道，请上下翻题复盘
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      <p className="rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        💡 建议先复盘错题（点上方「上一题/下一题」），再回到 Step 2
+        重新选考点出新题或调整模拟卷。
+      </p>
+    </div>
   );
 }
 
