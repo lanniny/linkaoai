@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { getPersistContext } from "@/lib/persistence";
 import {
   generateQuestionsRequestSchema,
   questionsBatchSchema,
@@ -217,6 +218,49 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       );
     }
 
+    // Optional persistence — only persists if Supabase configured + user
+    // signed in + course_id provided (i.e. came from a persisted /api/extract).
+    let persisted: { question_id_map: Record<string, string> } | null = null;
+    const ctx = await getPersistContext();
+    if (ctx && parsed.data.course_id) {
+      try {
+        const rows = validated.data.questions.map((q) => ({
+          course_id: parsed.data.course_id!,
+          user_id: ctx.user_id,
+          knowledge_point_id:
+            (q.knowledge_point_id &&
+              parsed.data.knowledge_point_id_map?.[q.knowledge_point_id]) ||
+            null,
+          qtype: q.qtype,
+          difficulty: q.difficulty,
+          prompt: q.prompt,
+          options: q.options ?? null,
+          reference_answer: q.reference_answer,
+          reference_explanation: q.reference_explanation,
+          generated_by: response.model,
+        }));
+        const { data: inserted, error: insErr } = await ctx.supabase
+          .from("questions")
+          .insert(rows)
+          .select("id");
+        if (!insErr && inserted) {
+          const question_id_map: Record<string, string> = {};
+          inserted.forEach((row, i) => {
+            const qid = validated.data.questions[i]?.id;
+            if (qid) question_id_map[qid] = row.id;
+          });
+          persisted = { question_id_map };
+        } else if (insErr) {
+          console.warn(
+            "[/api/generate-questions] questions insert failed:",
+            insErr,
+          );
+        }
+      } catch (err) {
+        console.warn("[/api/generate-questions] persistence threw:", err);
+      }
+    }
+
     return NextResponse.json({
       questions: validated.data.questions,
       meta: {
@@ -224,6 +268,7 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
         usage: response.usage,
         stopReason: response.stop_reason,
       },
+      persisted,
     });
   } catch (err) {
     console.error("[/api/generate-questions] error:", err);

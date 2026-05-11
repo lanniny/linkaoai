@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { getPersistContext } from "@/lib/persistence";
 import { gradeRequestSchema, gradeResultSchema } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -165,6 +166,34 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
       );
     }
 
+    // Optional persistence: write an attempt row if user signed in + question_db_id provided.
+    let persisted: { attempt_id: string } | null = null;
+    const ctx = await getPersistContext();
+    if (ctx && parsed.data.question_db_id) {
+      try {
+        const { data: row, error: attErr } = await ctx.supabase
+          .from("attempts")
+          .insert({
+            question_id: parsed.data.question_db_id,
+            user_id: ctx.user_id,
+            user_answer: user_answer,
+            is_correct: validated.data.is_correct,
+            ai_score: validated.data.ai_score,
+            ai_feedback: validated.data.ai_feedback,
+            graded_by: response.model,
+          })
+          .select("id")
+          .single();
+        if (!attErr && row) {
+          persisted = { attempt_id: row.id };
+        } else if (attErr) {
+          console.warn("[/api/grade] attempt insert failed:", attErr);
+        }
+      } catch (err) {
+        console.warn("[/api/grade] persistence threw:", err);
+      }
+    }
+
     return NextResponse.json({
       grade: validated.data,
       meta: {
@@ -173,6 +202,7 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
         stopReason: response.stop_reason,
         graded_by: response.model,
       },
+      persisted,
     });
   } catch (err) {
     console.error("[/api/grade] error:", err);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { getPersistContext } from "@/lib/persistence";
 import {
   sprintPlanRequestSchema,
   sprintPlanSchema,
@@ -206,6 +207,35 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       (d) => d.total_minutes > daily_minutes * 1.1,
     );
 
+    // Optional persistence — write sprint_plan row if user signed in + course_id provided.
+    let persisted: { sprint_plan_id: string } | null = null;
+    const ctx = await getPersistContext();
+    if (ctx && parsed.data.course_id) {
+      try {
+        const { data: row, error: spErr } = await ctx.supabase
+          .from("sprint_plans")
+          .insert({
+            course_id: parsed.data.course_id,
+            user_id: ctx.user_id,
+            exam_date: exam_date,
+            total_days: validated.data.total_days,
+            daily_tasks: validated.data.daily_tasks,
+          })
+          .select("id")
+          .single();
+        if (!spErr && row) {
+          persisted = { sprint_plan_id: row.id };
+        } else if (spErr) {
+          console.warn(
+            "[/api/sprint-plan] sprint_plan insert failed:",
+            spErr,
+          );
+        }
+      } catch (err) {
+        console.warn("[/api/sprint-plan] persistence threw:", err);
+      }
+    }
+
     return NextResponse.json({
       plan: validated.data,
       warnings: overrunDays.length > 0
@@ -221,6 +251,7 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
         usage: response.usage,
         stopReason: response.stop_reason,
       },
+      persisted,
     });
   } catch (err) {
     console.error("[/api/sprint-plan] error:", err);

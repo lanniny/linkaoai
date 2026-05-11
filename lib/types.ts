@@ -71,6 +71,10 @@ export const generateQuestionsRequestSchema = z.object({
   difficulty_focus: difficultyFocusSchema.optional(),
   // 限定到 outline.topics 的子集；不传则全大纲为出题源
   knowledge_point_ids: z.array(z.string().min(1)).max(80).optional(),
+  // Optional persistence linkage (returned by /api/extract.persisted.course_id)
+  course_id: z.string().uuid().optional(),
+  // Map from outline KP user-facing id ("kp-3") → DB UUID. From extract persisted.
+  knowledge_point_id_map: z.record(z.string(), z.string().uuid()).optional(),
 });
 export type GenerateQuestionsRequest = z.infer<
   typeof generateQuestionsRequestSchema
@@ -92,6 +96,9 @@ export const gradeRequestSchema = z.object({
       duration_seconds: z.number().int().min(0).max(86400).optional(),
     })
     .optional(),
+  // Optional persistence: DB UUID of the question (from generate-questions
+  // response persisted.question_id_map). Without it the grade is stateless.
+  question_db_id: z.string().uuid().optional(),
 });
 export type GradeRequest = z.infer<typeof gradeRequestSchema>;
 
@@ -150,5 +157,7 @@ export const sprintPlanRequestSchema = z.object({
   mastered_kp_ids: z.array(z.string().min(1)).max(80).optional(),
   // 起始日期；省略时由服务端用 "今天" (UTC) 注入
   start_date: isoDateSchema.optional(),
+  // Optional persistence linkage
+  course_id: z.string().uuid().optional(),
 });
 export type SprintPlanRequest = z.infer<typeof sprintPlanRequestSchema>;

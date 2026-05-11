@@ -123,6 +123,19 @@ export default function HomePage() {
   );
   const [selectedKpIds, setSelectedKpIds] = useState<Set<string>>(new Set());
 
+  // ----- Persistence linkage (lit up only when Supabase + auth + extract OK) -----
+  // Stored on the client so generate-questions / grade / sprint-plan can chain
+  // back to the persisted course → KPs → questions → attempts graph.
+  const [persistedCourseId, setPersistedCourseId] = useState<string | null>(
+    null,
+  );
+  const [persistedKpMap, setPersistedKpMap] = useState<
+    Record<string, string>
+  >({});
+  const [persistedQuestionIdMap, setPersistedQuestionIdMap] = useState<
+    Record<string, string>
+  >({});
+
   // ----- Step 3: generate questions config -----
   const [questionCount, setQuestionCount] = useState<number>(5);
   const [chosenQtypes, setChosenQtypes] = useState<Set<Qtype>>(
@@ -236,6 +249,15 @@ export default function HomePage() {
       const ol = data.outline as Outline;
       setOutline(ol);
       setExtractMeta({ model: data.meta?.model ?? "" });
+      // capture optional persistence linkage from this extract
+      if (data.persisted?.course_id) {
+        setPersistedCourseId(data.persisted.course_id);
+        setPersistedKpMap(data.persisted.knowledge_point_id_map ?? {});
+      } else {
+        setPersistedCourseId(null);
+        setPersistedKpMap({});
+      }
+      setPersistedQuestionIdMap({});
       // 默认全选必考 + 重点
       setSelectedKpIds(
         new Set(
@@ -277,12 +299,22 @@ export default function HomePage() {
           qtypes: Array.from(chosenQtypes),
           difficulty_focus: difficultyFocus,
           knowledge_point_ids: Array.from(selectedKpIds),
+          ...(persistedCourseId ? { course_id: persistedCourseId } : {}),
+          ...(persistedCourseId &&
+          Object.keys(persistedKpMap).length > 0
+            ? { knowledge_point_id_map: persistedKpMap }
+            : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok)
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
       setQuestions(data.questions as GeneratedQuestion[]);
+      if (data.persisted?.question_id_map) {
+        setPersistedQuestionIdMap(data.persisted.question_id_map);
+      } else {
+        setPersistedQuestionIdMap({});
+      }
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "未知错误");
     } finally {
@@ -308,6 +340,7 @@ export default function HomePage() {
           exam_date: examDate,
           daily_minutes: dailyMinutes,
           start_date: today,
+          ...(persistedCourseId ? { course_id: persistedCourseId } : {}),
         }),
       });
       const data = await res.json();
@@ -326,10 +359,15 @@ export default function HomePage() {
     setGradeLoading(true);
     setGradeError(null);
     try {
+      const questionDbId = persistedQuestionIdMap[q.id];
       const res = await fetch("/api/grade", {
         method: "POST",
         headers: { "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ question: q, user_answer: ua }),
+        body: JSON.stringify({
+          question: q,
+          user_answer: ua,
+          ...(questionDbId ? { question_db_id: questionDbId } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok)
