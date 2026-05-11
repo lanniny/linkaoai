@@ -103,3 +103,52 @@ export const gradeResultSchema = z.object({
   next_step_hint: z.string().min(1).max(500).optional(),
 });
 export type GradeResult = z.infer<typeof gradeResultSchema>;
+
+// ============================================================
+// Sprint plan (Day 7)
+// ============================================================
+
+// 单日内单条任务（指向某 KP + 分配时长 + 学习类型）
+export const sprintTaskSchema = z.object({
+  kp_id: z.string().min(1).max(40),
+  kp_title: z.string().min(1).max(200),
+  minutes: z.number().int().min(1).max(180),
+  task_type: z.enum(["学习", "复习", "练习", "模考"]),
+  note: z.string().max(120).optional(),
+});
+export type SprintTask = z.infer<typeof sprintTaskSchema>;
+
+// ISO date string YYYY-MM-DD
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "日期必须是 YYYY-MM-DD 格式");
+
+export const sprintDaySchema = z.object({
+  day: z.number().int().min(1).max(90),
+  date: isoDateSchema,
+  // 总分钟不应超过 daily_minutes，由 prompt 约束 + 校验
+  total_minutes: z.number().int().min(0).max(600),
+  day_focus: z.string().min(1).max(60),
+  tasks: z.array(sprintTaskSchema).min(0).max(12),
+});
+export type SprintDay = z.infer<typeof sprintDaySchema>;
+
+export const sprintPlanSchema = z.object({
+  exam_date: isoDateSchema,
+  total_days: z.number().int().min(1).max(90),
+  daily_minutes: z.number().int().min(15).max(600),
+  daily_tasks: z.array(sprintDaySchema).min(1).max(90),
+  general_advice: z.string().max(600).optional(),
+});
+export type SprintPlan = z.infer<typeof sprintPlanSchema>;
+
+export const sprintPlanRequestSchema = z.object({
+  outline: outlineSchema,
+  exam_date: isoDateSchema, // 考试当天日期
+  daily_minutes: z.number().int().min(15).max(300).default(60),
+  // 已掌握、可降权或跳过的知识点 id 列表
+  mastered_kp_ids: z.array(z.string().min(1)).max(80).optional(),
+  // 起始日期；省略时由服务端用 "今天" (UTC) 注入
+  start_date: isoDateSchema.optional(),
+});
+export type SprintPlanRequest = z.infer<typeof sprintPlanRequestSchema>;
