@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // If Supabase env not set yet (e.g., before Day-1 account registration),
   // skip silently so dev mode still boots.
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
