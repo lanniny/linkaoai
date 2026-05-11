@@ -1,12 +1,32 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 
+import PayForm from "./PayForm";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
 export const metadata: Metadata = {
   title: "付费 · 临考 Linkao",
   description: "19.9 元 / 单科 · 挂科退款 · MVP 手动支付模式",
 };
 
-export default function PayPage() {
+export const runtime = "nodejs";
+
+async function getSession() {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+export default async function PayPage() {
+  const user = await getSession();
   return (
     <main className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="space-y-2">
@@ -53,31 +73,25 @@ export default function PayPage() {
       </section>
 
       <section className="space-y-4 rounded-lg border bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">💰 付款方式（MVP 手动模式）</h2>
+        <h2 className="text-lg font-semibold">💰 下单（MVP 手动模式）</h2>
         <p className="text-sm text-zinc-600">
-          30 天 MVP 阶段暂未接入易支付 / Stripe 等自动支付，请通过下面流程：
+          选择学科 + 付款渠道，提交后会拿到一个订单号；
+          联系微信
+          <code className="mx-1 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs">
+            your-wechat-id
+          </code>
+          发送订单号 + 转账截图，我们 24h 内开通账户。
         </p>
-        <ol className="list-decimal space-y-2 pl-5 text-sm text-zinc-700">
-          <li>
-            加微信：
-            <code className="ml-1 rounded bg-zinc-100 px-2 py-0.5 font-mono">
-              your-wechat-id
-            </code>
-            <span className="ml-2 text-xs text-zinc-400">
-              （占位，等待 founder 填入实际微信号）
-            </span>
-          </li>
-          <li>
-            备注「<strong>临考 + 学科 + 邮箱</strong>」（例：临考 高数
-            you@example.com）
-          </li>
-          <li>转账 19.9 元 / 单科（可多科一起转，备注列全）</li>
-          <li>24h 内开通账号 + 发送账户激活链接到你的邮箱</li>
-        </ol>
-        <p className="rounded bg-zinc-50 p-2 text-xs text-zinc-500">
-          🔐 持久化账户系统 (Supabase auth + 历史记录) 计划在 Day 8+ 上线。
-          内测期解锁直接绑定到邮箱，不需要先注册账号。
-        </p>
+        <PayForm signedIn={!!user} />
+        {!user && (
+          <p className="text-xs text-zinc-500">
+            （下单需要先登录 ·{" "}
+            <Link href="/login?next=/pay" className="underline">
+              去登录
+            </Link>
+            ）
+          </p>
+        )}
       </section>
 
       <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs leading-relaxed text-red-900">

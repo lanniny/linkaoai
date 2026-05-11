@@ -149,6 +149,26 @@ export const sprintPlanSchema = z.object({
 });
 export type SprintPlan = z.infer<typeof sprintPlanSchema>;
 
+// ============================================================
+// Payments (Day 8)
+// ============================================================
+
+export const paymentChannelSchema = z.enum([
+  "wechat_manual",
+  "alipay_manual",
+  "epay",
+  "hupijiao",
+]);
+export type PaymentChannel = z.infer<typeof paymentChannelSchema>;
+
+export const paymentIntentRequestSchema = z.object({
+  subject: subjectSchema,
+  channel: paymentChannelSchema,
+  // optional buyer note attached to the order (e.g., extra contact info)
+  notes: z.string().max(200).optional(),
+});
+export type PaymentIntentRequest = z.infer<typeof paymentIntentRequestSchema>;
+
 export const sprintPlanRequestSchema = z.object({
   outline: outlineSchema,
   exam_date: isoDateSchema, // 考试当天日期
