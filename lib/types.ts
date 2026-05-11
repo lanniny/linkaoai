@@ -156,10 +156,32 @@ export type SprintPlan = z.infer<typeof sprintPlanSchema>;
 export const paymentChannelSchema = z.enum([
   "wechat_manual",
   "alipay_manual",
-  "epay",
-  "hupijiao",
+  "epay_alipay",
+  "epay_wxpay",
+  "redemption_code",
 ]);
 export type PaymentChannel = z.infer<typeof paymentChannelSchema>;
+
+// Sub-request for /api/payment/epay/create — turns a pending payment into a
+// signed EPay redirect URL. order_id from /api/payment/intent response.
+export const epayCreateRequestSchema = z.object({
+  order_id: z.string().uuid(),
+  type: z.enum(["alipay", "wxpay", "qqpay"]),
+});
+export type EpayCreateRequest = z.infer<typeof epayCreateRequestSchema>;
+
+// Redemption code redeem — user submits code, server atomically marks
+// code used + inserts paid payment row.
+export const redemptionRedeemRequestSchema = z.object({
+  code: z
+    .string()
+    .min(4)
+    .max(64)
+    .regex(/^[A-Z0-9\-_]+$/i, "兑换码只能含字母、数字、- _"),
+});
+export type RedemptionRedeemRequest = z.infer<
+  typeof redemptionRedeemRequestSchema
+>;
 
 export const paymentIntentRequestSchema = z.object({
   subject: subjectSchema,

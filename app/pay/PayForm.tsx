@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import type { PaymentChannel, Subject } from "@/lib/types";
 
 const SUBJECTS: Subject[] = ["高数", "线代", "概率论", "其他"];
 
 const CHANNEL_LABELS: Record<PaymentChannel, string> = {
-  wechat_manual: "微信（手动转账，备注开通）",
-  alipay_manual: "支付宝（手动转账，备注开通）",
-  epay: "易支付（自动渠道，待接入）",
-  hupijiao: "虎皮椒（自动渠道，待接入）",
+  epay_alipay: "支付宝（自动跳转 EPay）",
+  epay_wxpay: "微信（自动跳转 EPay）",
+  wechat_manual: "微信（手动转账 · 24h 内开通）",
+  alipay_manual: "支付宝（手动转账 · 24h 内开通）",
+  redemption_code: "兑换码（已有码可直接兑换）",
 };
 
 interface Order {
@@ -23,21 +25,52 @@ interface Order {
 
 export default function PayForm({ signedIn }: { signedIn: boolean }) {
   const [subject, setSubject] = useState<Subject>("高数");
-  const [channel, setChannel] = useState<PaymentChannel>("wechat_manual");
+  const [channel, setChannel] = useState<PaymentChannel>("epay_alipay");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
 
+  // Pick up ?return=success|failed|... from EPay return_url for inline banner
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    const ret = p.get("return");
+    if (!ret) return;
+    if (ret === "success") {
+      toast.success("支付成功！账户已开通", {
+        description: `订单 ${p.get("order") ?? ""} 已标记 paid`,
+      });
+    } else if (ret === "failed") {
+      toast.error("支付失败", { description: "请重新下单或联系客服" });
+    } else if (ret === "sign_error") {
+      toast.error("支付回调签名校验失败", {
+        description: "请联系客服核对订单状态",
+      });
+    } else if (ret === "disabled") {
+      toast.error("EPay 暂未启用", {
+        description: "请改用手动渠道或兑换码",
+      });
+    }
+    // strip the query to keep URL clean
+    const url = new URL(window.location.href);
+    url.searchParams.delete("return");
+    url.searchParams.delete("order");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!signedIn) {
-      setError("请先点击右上角「登录 / 注册」完成登录");
+      const msg = "请先点击右上角「登录」完成登录";
+      setError(msg);
+      toast.error(msg);
       return;
     }
     setLoading(true);
     setError(null);
     try {
+      // Step 1: create pending order
       const res = await fetch("/api/payment/intent", {
         method: "POST",
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -51,9 +84,42 @@ export default function PayForm({ signedIn }: { signedIn: boolean }) {
       if (!res.ok) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
-      setOrder(data.order as Order);
+      const createdOrder = data.order as Order;
+
+      // Step 2: if EPay channel, immediately exchange for a redirect URL
+      if (channel === "epay_alipay" || channel === "epay_wxpay") {
+        const epayRes = await fetch("/api/payment/epay/create", {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          body: JSON.stringify({
+            order_id: createdOrder.id,
+            type: channel === "epay_alipay" ? "alipay" : "wxpay",
+          }),
+        });
+        const epayData = await epayRes.json();
+        if (!epayRes.ok) {
+          // Surface the order anyway so user can fall back to manual
+          setOrder(createdOrder);
+          throw new Error(
+            (epayData.error ?? `HTTP ${epayRes.status}`) +
+              "（已自动转手动模式，可发送订单号给客服）",
+          );
+        }
+        toast("跳转到支付页…", {
+          description: "支付完成会自动回到 /pay",
+        });
+        window.location.href = epayData.payment_url as string;
+        return;
+      }
+
+      setOrder(createdOrder);
+      toast.success("订单已创建", {
+        description: `订单号 ${createdOrder.id.slice(0, 8)}…`,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "未知错误");
+      const msg = err instanceof Error ? err.message : "未知错误";
+      setError(msg);
+      toast.error("下单失败", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -173,11 +239,105 @@ export default function PayForm({ signedIn }: { signedIn: boolean }) {
       >
         {loading
           ? "提交中…"
-          : signedIn
-            ? "下单（19.9 元 / 单科）"
-            : "请先登录后下单"}
+          : !signedIn
+            ? "请先登录后下单"
+            : channel === "epay_alipay" || channel === "epay_wxpay"
+              ? "下单并跳转支付（19.9 元）"
+              : channel === "redemption_code"
+                ? "下方输入兑换码 →"
+                : "下单（19.9 元 / 单科）"}
       </button>
       {error && <p className="text-sm text-red-600">⚠️ {error}</p>}
+      {channel === "redemption_code" && <RedemptionForm signedIn={signedIn} />}
     </form>
+  );
+}
+
+function RedemptionForm({ signedIn }: { signedIn: boolean }) {
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState<{
+    subject: string;
+    amount_cny: number;
+  } | null>(null);
+
+  async function handleRedeem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!signedIn) {
+      toast.error("请先登录后再兑换");
+      return;
+    }
+    if (!code.trim()) {
+      toast.error("请输入兑换码");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/redemption/redeem", {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error("兑换失败", { description: data.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      setSuccess({ subject: data.subject, amount_cny: data.amount_cny });
+      toast.success("兑换成功！", {
+        description: `${data.subject} 已解锁，价值 ${Number(data.amount_cny).toFixed(2)} 元`,
+      });
+      setCode("");
+    } catch (err) {
+      toast.error("兑换失败", {
+        description: err instanceof Error ? err.message : "未知错误",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+        ✓ 兑换成功 · {success.subject} 已解锁（{Number(success.amount_cny).toFixed(2)} 元）
+        <button
+          type="button"
+          onClick={() => setSuccess(null)}
+          className="ml-2 text-xs underline"
+        >
+          再兑一张
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2 rounded border border-zinc-200 bg-zinc-50 p-3">
+      <label className="block text-xs font-medium text-zinc-600">
+        兑换码（不区分大小写）
+      </label>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          disabled={loading || !signedIn}
+          maxLength={64}
+          autoCapitalize="characters"
+          autoCorrect="off"
+          className="flex-1 rounded border border-zinc-300 bg-white px-2 py-1 font-mono text-sm uppercase"
+          placeholder="例: LINKAO-XXXX"
+        />
+        <button
+          type="button"
+          onClick={handleRedeem}
+          disabled={loading || !signedIn || !code.trim()}
+          className="rounded bg-emerald-700 px-4 py-1 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? "校验中…" : "兑换"}
+        </button>
+      </div>
+    </div>
   );
 }
