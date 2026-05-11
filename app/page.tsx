@@ -9,6 +9,8 @@ import type {
   KnowledgePoint,
   Outline,
   Qtype,
+  SprintDay,
+  SprintPlan,
   Subject,
 } from "@/lib/types";
 
@@ -139,6 +141,26 @@ export default function HomePage() {
   const currentQ = questions[currentIdx];
   const currentGrade = currentQ ? grades[currentQ.id] : undefined;
 
+  // ----- Step 5: sprint plan (optional, parallel to questions branch) -----
+  // React 19 lint flags Date.now() inside useMemo as impure; useState lazy
+  // init is the idiomatic way to compute "once at mount" values.
+  const [today] = useState(() => {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
+  });
+  const [examDate, setExamDate] = useState<string>(() => {
+    const d = new Date(Date.now() + 14 * 86400000);
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
+  });
+  const [dailyMinutes, setDailyMinutes] = useState<number>(60);
+  const [sprintPlan, setSprintPlan] = useState<SprintPlan | null>(null);
+  const [sprintLoading, setSprintLoading] = useState(false);
+  const [sprintError, setSprintError] = useState<string | null>(null);
+
   // ----- handlers -----
   async function handleExtract(e: React.FormEvent) {
     e.preventDefault();
@@ -216,6 +238,37 @@ export default function HomePage() {
       setGenerateError(err instanceof Error ? err.message : "未知错误");
     } finally {
       setGenerateLoading(false);
+    }
+  }
+
+  async function handleSprintPlan() {
+    if (!outline) return;
+    if (examDate < today) {
+      setSprintError("考试日期不能早于今天");
+      return;
+    }
+    setSprintLoading(true);
+    setSprintError(null);
+    setSprintPlan(null);
+    try {
+      const res = await fetch("/api/sprint-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          outline,
+          exam_date: examDate,
+          daily_minutes: dailyMinutes,
+          start_date: today,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      setSprintPlan(data.plan as SprintPlan);
+    } catch (err) {
+      setSprintError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setSprintLoading(false);
     }
   }
 
@@ -491,6 +544,79 @@ export default function HomePage() {
               <p className="text-sm text-red-600">⚠️ {generateError}</p>
             )}
           </div>
+
+          {/* ---------- Sprint plan sub-panel ---------- */}
+          <div className="space-y-3 border-t pt-4">
+            <div className="flex items-baseline gap-2">
+              <span className="text-base">🎯</span>
+              <h3 className="text-sm font-semibold">
+                冲刺计划（按考试日期排日程）
+              </h3>
+            </div>
+            <p className="text-xs text-zinc-500">
+              AI 会按「必考 ≥ 重点 ≫ 了解」优先级 + 间隔重复 + 末段模考的逻辑，
+              给你一份逐日学习清单。
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label
+                  className="block text-xs font-medium text-zinc-600"
+                  htmlFor="exam-date"
+                >
+                  考试日期
+                </label>
+                <input
+                  id="exam-date"
+                  type="date"
+                  value={examDate}
+                  min={today}
+                  onChange={(e) => setExamDate(e.target.value)}
+                  className="mt-1 w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm"
+                />
+              </div>
+              <div>
+                <label
+                  className="block text-xs font-medium text-zinc-600"
+                  htmlFor="daily-minutes"
+                >
+                  每日学习（分钟）
+                </label>
+                <input
+                  id="daily-minutes"
+                  type="number"
+                  min={15}
+                  max={300}
+                  step={15}
+                  value={dailyMinutes}
+                  onChange={(e) =>
+                    setDailyMinutes(
+                      Math.max(
+                        15,
+                        Math.min(300, Number(e.target.value) || 60),
+                      ),
+                    )
+                  }
+                  className="mt-1 w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={handleSprintPlan}
+                  disabled={sprintLoading || examDate < today}
+                  className="w-full rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {sprintLoading
+                    ? "生成中…（约 10-30 秒）"
+                    : "生成冲刺计划"}
+                </button>
+              </div>
+            </div>
+            {sprintError && (
+              <p className="text-sm text-red-600">⚠️ {sprintError}</p>
+            )}
+            {sprintPlan && <SprintPlanPanel plan={sprintPlan} />}
+          </div>
         </section>
       )}
 
@@ -703,6 +829,78 @@ function KpRow({
         </div>
       </label>
     </li>
+  );
+}
+
+const TASK_TYPE_STYLES: Record<SprintDay["tasks"][number]["task_type"], string> =
+  {
+    学习: "bg-blue-50 text-blue-800 border-blue-200",
+    复习: "bg-amber-50 text-amber-800 border-amber-200",
+    练习: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    模考: "bg-red-50 text-red-800 border-red-200",
+  };
+
+function SprintPlanPanel({ plan }: { plan: SprintPlan }) {
+  return (
+    <div className="space-y-3 rounded border border-emerald-200 bg-emerald-50/30 p-3 text-sm">
+      <div className="flex items-center justify-between text-xs text-zinc-600">
+        <span>
+          共 {plan.total_days} 天 · {plan.daily_minutes} 分钟/天
+        </span>
+        <span>考试日 {plan.exam_date}</span>
+      </div>
+      <ul className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
+        {plan.daily_tasks.map((d) => (
+          <li
+            key={d.day}
+            className="rounded border border-zinc-200 bg-white p-3"
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium">
+                Day {d.day}{" "}
+                <span className="font-mono text-xs text-zinc-500">
+                  · {d.date}
+                </span>
+              </span>
+              <span className="text-xs text-zinc-500">{d.total_minutes} min</span>
+            </div>
+            <p className="mt-1 text-xs text-zinc-600">📌 {d.day_focus}</p>
+            {d.tasks.length === 0 ? (
+              <p className="mt-2 text-xs text-zinc-400">（无任务 · 休息日）</p>
+            ) : (
+              <ul className="mt-2 space-y-1">
+                {d.tasks.map((t, i) => (
+                  <li
+                    key={i}
+                    className="flex items-baseline gap-2 text-xs leading-relaxed"
+                  >
+                    <span
+                      className={`shrink-0 rounded border px-1.5 py-0.5 ${TASK_TYPE_STYLES[t.task_type] ?? ""}`}
+                    >
+                      {t.task_type}
+                    </span>
+                    <span className="flex-1">
+                      <span className="text-zinc-700">{t.kp_title}</span>
+                      <span className="ml-1 text-zinc-400">
+                        ({t.minutes}min)
+                      </span>
+                      {t.note && (
+                        <span className="ml-1 text-zinc-500">— {t.note}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+      {plan.general_advice && (
+        <div className="rounded bg-white p-2 text-xs text-zinc-600">
+          💡 {plan.general_advice}
+        </div>
+      )}
+    </div>
   );
 }
 
