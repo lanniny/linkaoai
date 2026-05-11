@@ -338,12 +338,20 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto max-w-3xl space-y-8 p-6">
-      <header>
-        <h1 className="text-3xl font-bold">临考</h1>
-        <p className="mt-1 text-zinc-600">
+      <header className="space-y-2">
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="text-3xl font-bold">临考</h1>
+          <a
+            href="/pay"
+            className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
+          >
+            💰 19.9 / 科 · 挂科退款 →
+          </a>
+        </div>
+        <p className="text-zinc-600">
           AI 期末冲刺 · 高数 / 线代 / 概率论
         </p>
-        <p className="mt-2 text-xs text-zinc-400">
+        <p className="text-xs text-zinc-400">
           AI 生成内容仅供参考，请以教材 / 老师讲义为准
         </p>
       </header>
