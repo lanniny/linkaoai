@@ -1,10 +1,10 @@
+import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isAdmin } from "@/lib/admin";
-import { isSupabaseAdminConfigured } from "@/lib/supabase/config";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { db, systemSettings } from "@/lib/db";
 import { readAllSettings } from "@/lib/system-settings";
 
 export const runtime = "nodejs";
@@ -20,17 +20,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!isSupabaseAdminConfigured()) {
-    return NextResponse.json(
-      { error: "supabase_admin_not_configured" },
-      { status: 503 },
-    );
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user: caller },
-  } = await supabase.auth.getUser();
+  const session = await auth.api.getSession({ headers: await headers() });
+  const caller = session?.user;
   if (!isAdmin(caller)) {
     return NextResponse.json(
       { error: "forbidden", message: "需要管理员权限" },
@@ -48,20 +39,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("system_settings").upsert(
-    {
-      key: body.key,
-      value_json: body.value_json,
-      updated_at: new Date().toISOString(),
-      updated_by: caller!.id,
-    },
-    { onConflict: "key" },
-  );
-
-  if (error) {
+  try {
+    await db
+      .insert(systemSettings)
+      .values({
+        key: body.key,
+        valueJson: body.value_json as unknown as never,
+        updatedAt: new Date(),
+        updatedBy: caller!.id,
+      })
+      .onConflictDoUpdate({
+        target: systemSettings.key,
+        set: {
+          valueJson: body.value_json as unknown as never,
+          updatedAt: new Date(),
+          updatedBy: caller!.id,
+        },
+      });
+  } catch (err) {
     return NextResponse.json(
-      { error: "upsert_failed", message: error.message },
+      {
+        error: "upsert_failed",
+        message: err instanceof Error ? err.message : "unknown",
+      },
       { status: 500 },
     );
   }

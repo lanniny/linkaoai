@@ -1,15 +1,15 @@
+import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isRootAdmin } from "@/lib/admin";
-import { isSupabaseAdminConfigured } from "@/lib/supabase/config";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { db, user } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 const bodySchema = z.object({
-  // 0 = user, 1 = admin, 10 = root
   role: z.union([z.literal(0), z.literal(1), z.literal(10)]),
 });
 
@@ -18,18 +18,8 @@ interface Ctx {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
-  if (!isSupabaseAdminConfigured()) {
-    return NextResponse.json(
-      { error: "supabase_admin_not_configured" },
-      { status: 503 },
-    );
-  }
-
-  // Only root admins may rebalance roles.
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user: caller },
-  } = await supabase.auth.getUser();
+  const session = await auth.api.getSession({ headers: await headers() });
+  const caller = session?.user;
   if (!isRootAdmin(caller)) {
     return NextResponse.json(
       { error: "forbidden", message: "需要 root 权限" },
@@ -55,32 +45,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     );
   }
 
-  const admin = createSupabaseAdminClient();
-  // Preserve existing app_metadata; merge only `role`.
-  const { data: target, error: getErr } = await admin.auth.admin.getUserById(
-    targetId,
-  );
-  if (getErr || !target.user) {
+  const [target] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.id, targetId))
+    .limit(1);
+  if (!target) {
     return NextResponse.json(
-      { error: "user_not_found", message: getErr?.message ?? "User not found" },
+      { error: "user_not_found", message: "User not found" },
       { status: 404 },
     );
   }
-  const nextMeta = { ...(target.user.app_metadata ?? {}), role: body.role };
 
-  const { data, error } = await admin.auth.admin.updateUserById(targetId, {
-    app_metadata: nextMeta,
-  });
-  if (error) {
+  try {
+    await db
+      .update(user)
+      .set({ role: body.role, updatedAt: new Date() })
+      .where(eq(user.id, targetId));
+  } catch (err) {
     return NextResponse.json(
-      { error: "update_failed", message: error.message },
+      {
+        error: "update_failed",
+        message: err instanceof Error ? err.message : "unknown",
+      },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({
-    ok: true,
-    user_id: data.user?.id,
-    role: data.user?.app_metadata?.role,
-  });
+  return NextResponse.json({ ok: true, user_id: targetId, role: body.role });
 }

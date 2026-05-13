@@ -1,38 +1,34 @@
 import "server-only";
 
-import { isSupabaseConfigured } from "./supabase/config";
-import { createSupabaseServerClient } from "./supabase/server";
+import { headers } from "next/headers";
 
-type SupabaseServerClient = Awaited<
-  ReturnType<typeof createSupabaseServerClient>
->;
+import { auth } from "@/lib/auth";
+import { db, type DB } from "@/lib/db";
 
 export interface PersistContext {
   user_id: string;
-  supabase: SupabaseServerClient;
+  db: DB;
 }
 
 /**
- * Returns a write-ready context iff:
- *   1. Supabase env is filled in (URL + anon key), AND
- *   2. The current request has a valid auth.users session cookie.
+ * Returns a write-ready context iff the current request has a valid
+ * better-auth session cookie.
  *
  * Returns null otherwise. NEVER throws — every callsite can safely do:
  *
  *   const ctx = await getPersistContext();
  *   if (!ctx) return stateless_response;
- *   // ...ctx.supabase.from('...').insert(...)
+ *   // ...ctx.db.insert(...)
  *
- * This shape is what lets every AI route stay end-to-end usable before
- * Supabase is provisioned (Day 7) and light up automatically after (Day 8+).
+ * Drizzle + SQLite is always available in this stack (no "configured?" check
+ * needed), so the only failure mode is "no session". Logged-out callers
+ * still get a stateless run.
  */
 export async function getPersistContext(): Promise<PersistContext | null> {
-  if (!isSupabaseConfigured()) return null;
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) return null;
-    return { user_id: data.user.id, supabase };
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session?.user) return null;
+    return { user_id: session.user.id, db };
   } catch (err) {
     console.warn("[persistence] getPersistContext threw:", err);
     return null;

@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
+import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isAdmin } from "@/lib/admin";
-import { isSupabaseAdminConfigured } from "@/lib/supabase/config";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { db, redemptionCodes } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -28,17 +28,8 @@ function makeCode(len = 10): string {
 }
 
 export async function POST(req: NextRequest) {
-  if (!isSupabaseAdminConfigured()) {
-    return NextResponse.json(
-      { error: "supabase_admin_not_configured" },
-      { status: 503 },
-    );
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user: caller },
-  } = await supabase.auth.getUser();
+  const session = await auth.api.getSession({ headers: await headers() });
+  const caller = session?.user;
   if (!isAdmin(caller)) {
     return NextResponse.json(
       { error: "forbidden", message: "需要管理员权限" },
@@ -56,18 +47,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const admin = createSupabaseAdminClient();
   const expires_at = body.expires_in_days
-    ? new Date(Date.now() + body.expires_in_days * 86400 * 1000).toISOString()
+    ? new Date(Date.now() + body.expires_in_days * 86400 * 1000)
     : null;
 
-  // Generate `count` codes. If we hit a duplicate on insert, try once more.
   const rows: {
     code: string;
     subject: string;
-    amount_cny: number;
+    amountCny: number;
     notes: string | null;
-    expires_at: string | null;
+    expiresAt: Date | null;
   }[] = [];
   const seen = new Set<string>();
   while (rows.length < body.count) {
@@ -77,28 +66,29 @@ export async function POST(req: NextRequest) {
     rows.push({
       code,
       subject: body.subject,
-      amount_cny: body.amount_cny,
+      amountCny: body.amount_cny,
       notes: body.notes ?? null,
-      expires_at,
+      expiresAt: expires_at,
     });
   }
 
-  const { data, error } = await admin
-    .from("redemption_codes")
-    .insert(rows)
-    .select("code");
-
-  if (error) {
-    // A unique collision with an existing row is the only realistic failure.
+  try {
+    const inserted = await db
+      .insert(redemptionCodes)
+      .values(rows)
+      .returning({ code: redemptionCodes.code });
+    return NextResponse.json({
+      ok: true,
+      count: inserted.length,
+      codes: inserted.map((r) => r.code),
+    });
+  } catch (err) {
     return NextResponse.json(
-      { error: "insert_failed", message: error.message },
+      {
+        error: "insert_failed",
+        message: err instanceof Error ? err.message : "unknown",
+      },
       { status: 500 },
     );
   }
-
-  return NextResponse.json({
-    ok: true,
-    count: data?.length ?? 0,
-    codes: (data ?? []).map((r) => r.code),
-  });
 }
