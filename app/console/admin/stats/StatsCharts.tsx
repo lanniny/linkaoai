@@ -51,7 +51,10 @@ export function StatsCharts(props: StatsProps) {
             />
             <YAxis stroke="#71717a" fontSize={10} tickLine={false} />
             <Tooltip
-              formatter={(v: number) => `¥${v.toFixed(2)}`}
+              formatter={(value) => [
+                `¥${Number(value).toFixed(2)}`,
+                "收入",
+              ]}
               contentStyle={{ fontSize: 12 }}
             />
             <Line
