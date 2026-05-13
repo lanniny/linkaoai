@@ -39,6 +39,7 @@ const adminItems = [
   { href: "/console/admin/codes", label: "兑换码", icon: TicketCheck },
   { href: "/console/admin/channels", label: "AI 渠道", icon: Cable },
   { href: "/console/admin/logs", label: "AI 日志", icon: FileBarChart },
+  { href: "/console/admin/stats", label: "数据看板", icon: BarChart3 },
   { href: "/console/admin/settings", label: "系统设置", icon: Settings2 },
 ];
 

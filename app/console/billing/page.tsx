@@ -1,4 +1,5 @@
-import { AlertTriangle, BadgeCheck, ShieldCheck } from "lucide-react";
+import { AlertTriangle, BadgeCheck, ListChecks, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 
 import PayForm from "@/app/pay/PayForm";
 
@@ -63,6 +64,16 @@ export default function ConsoleBillingPage() {
           </li>
         </ul>
       </section>
+
+      <div className="flex justify-end">
+        <Link
+          href="/console/billing/history"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          <ListChecks className="h-3.5 w-3.5" />
+          查看历史订单
+        </Link>
+      </div>
 
       {/* Pay form */}
       <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">

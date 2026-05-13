@@ -20,7 +20,9 @@ const labels: Record<string, string> = {
   "/console/admin/codes": "兑换码管理",
   "/console/admin/channels": "AI 渠道路由",
   "/console/admin/logs": "AI 调用日志",
+  "/console/admin/stats": "数据看板",
   "/console/admin/settings": "系统设置",
+  "/console/billing/history": "下单记录",
 };
 
 const subtitles: Record<string, string> = {
@@ -37,7 +39,9 @@ const subtitles: Record<string, string> = {
   "/console/admin/codes": "批量生成 · 全部兑换码",
   "/console/admin/channels": "Anthropic 中转配置 · 优先级 · 健康检查",
   "/console/admin/logs": "Token 消费 · 错误率 · 路由过滤",
+  "/console/admin/stats": "收入 · 注册 · 学科分布 · 模型用量",
   "/console/admin/settings": "定价 / 配额 / 维护开关 / 公告",
+  "/console/billing/history": "全部订单按月聚合 · 退款流水",
 };
 
 export function Header({

@@ -3,6 +3,7 @@ import { Receipt } from "lucide-react";
 
 import { db, payments, user } from "@/lib/db";
 import { OrderMarkPaidButton } from "./OrderMarkPaidButton";
+import { OrderRefundButton } from "./OrderRefundButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -151,6 +152,17 @@ export default async function AdminOrdersPage() {
                 <td className="px-3 py-2 text-right">
                   {p.status === "pending" && (
                     <OrderMarkPaidButton paymentId={p.id} />
+                  )}
+                  {p.status === "paid" && (
+                    <OrderRefundButton paymentId={p.id} />
+                  )}
+                  {p.status === "refunded" && p.refundReason && (
+                    <span
+                      className="font-mono text-[10px] text-zinc-500"
+                      title={p.refundReason}
+                    >
+                      已退款
+                    </span>
                   )}
                 </td>
               </tr>
