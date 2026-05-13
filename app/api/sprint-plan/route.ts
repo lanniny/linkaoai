@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { sprintPlans } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import {
   sprintPlanRequestSchema,
@@ -212,24 +213,19 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
     const ctx = await getPersistContext();
     if (ctx && parsed.data.course_id) {
       try {
-        const { data: row, error: spErr } = await ctx.supabase
-          .from("sprint_plans")
-          .insert({
-            course_id: parsed.data.course_id,
-            user_id: ctx.user_id,
-            exam_date: exam_date,
-            total_days: validated.data.total_days,
-            daily_tasks: validated.data.daily_tasks,
+        const [row] = await ctx.db
+          .insert(sprintPlans)
+          .values({
+            courseId: parsed.data.course_id,
+            userId: ctx.user_id,
+            examDate: exam_date,
+            totalDays: validated.data.total_days,
+            dailyMinutes: daily_minutes,
+            plan: validated.data,
           })
-          .select("id")
-          .single();
-        if (!spErr && row) {
+          .returning({ id: sprintPlans.id });
+        if (row) {
           persisted = { sprint_plan_id: row.id };
-        } else if (spErr) {
-          console.warn(
-            "[/api/sprint-plan] sprint_plan insert failed:",
-            spErr,
-          );
         }
       } catch (err) {
         console.warn("[/api/sprint-plan] persistence threw:", err);

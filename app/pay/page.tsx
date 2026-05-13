@@ -1,9 +1,9 @@
-import Link from "next/link";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import Link from "next/link";
 
 import PayForm from "./PayForm";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "付费 · 临考 Linkao",
@@ -12,21 +12,17 @@ export const metadata: Metadata = {
 
 export const runtime = "nodejs";
 
-async function getSession() {
-  if (!isSupabaseConfigured()) return null;
+async function getViewerUser() {
   try {
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    return user;
+    const session = await auth.api.getSession({ headers: await headers() });
+    return session?.user ?? null;
   } catch {
     return null;
   }
 }
 
 export default async function PayPage() {
-  const user = await getSession();
+  const user = await getViewerUser();
   return (
     <main className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="space-y-2">

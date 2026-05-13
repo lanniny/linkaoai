@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { questions } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import {
   generateQuestionsRequestSchema,
@@ -225,9 +226,9 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
     if (ctx && parsed.data.course_id) {
       try {
         const rows = validated.data.questions.map((q) => ({
-          course_id: parsed.data.course_id!,
-          user_id: ctx.user_id,
-          knowledge_point_id:
+          courseId: parsed.data.course_id!,
+          userId: ctx.user_id,
+          knowledgePointId:
             (q.knowledge_point_id &&
               parsed.data.knowledge_point_id_map?.[q.knowledge_point_id]) ||
             null,
@@ -235,27 +236,20 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
           difficulty: q.difficulty,
           prompt: q.prompt,
           options: q.options ?? null,
-          reference_answer: q.reference_answer,
-          reference_explanation: q.reference_explanation,
-          generated_by: response.model,
+          referenceAnswer: q.reference_answer,
+          referenceExplanation: q.reference_explanation,
+          meta: { generated_by: response.model },
         }));
-        const { data: inserted, error: insErr } = await ctx.supabase
-          .from("questions")
-          .insert(rows)
-          .select("id");
-        if (!insErr && inserted) {
-          const question_id_map: Record<string, string> = {};
-          inserted.forEach((row, i) => {
-            const qid = validated.data.questions[i]?.id;
-            if (qid) question_id_map[qid] = row.id;
-          });
-          persisted = { question_id_map };
-        } else if (insErr) {
-          console.warn(
-            "[/api/generate-questions] questions insert failed:",
-            insErr,
-          );
-        }
+        const inserted = await ctx.db
+          .insert(questions)
+          .values(rows)
+          .returning({ id: questions.id });
+        const question_id_map: Record<string, string> = {};
+        inserted.forEach((row, i: number) => {
+          const qid = validated.data.questions[i]?.id;
+          if (qid) question_id_map[qid] = row.id;
+        });
+        persisted = { question_id_map };
       } catch (err) {
         console.warn("[/api/generate-questions] persistence threw:", err);
       }

@@ -1,10 +1,10 @@
 import "server-only";
 
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
+import { db, payments } from "@/lib/db";
 import { getEpayConfig, verifyEpayCallback } from "@/lib/epay";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { isSupabaseAdminConfigured } from "@/lib/supabase/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // never cache callbacks
@@ -16,9 +16,6 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   const epay = getEpayConfig();
   if (!epay) {
     return new NextResponse("disabled", { status: 503 });
-  }
-  if (!isSupabaseAdminConfigured()) {
-    return new NextResponse("db_not_configured", { status: 503 });
   }
 
   // Collect params from query (GET) or url-encoded body (POST)
@@ -48,32 +45,30 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("sign_error", { status: 400 });
   }
 
-  // Only mark paid on explicit success status
   const tradeStatus = params.trade_status;
   const orderId = params.out_trade_no;
   if (!orderId) {
     return new NextResponse("missing_order", { status: 400 });
   }
   if (tradeStatus !== "TRADE_SUCCESS") {
-    // Acknowledge other states (e.g., REFUND) without flipping to paid
+    // Acknowledge non-success states without flipping the order.
     return new NextResponse("success", { status: 200 });
   }
 
-  const admin = createSupabaseAdminClient();
-  // Idempotent: only flip pending -> paid; if already paid we still return
-  // success so EPay stops retrying.
-  const { error: updateErr } = await admin
-    .from("payments")
-    .update({
-      status: "paid",
-      paid_at: new Date().toISOString(),
-      external_ref: params.trade_no ?? null,
-    })
-    .eq("id", orderId)
-    .eq("status", "pending");
-
-  if (updateErr) {
-    console.error("[epay/notify] update failed:", updateErr);
+  try {
+    // Idempotent: only flip pending -> paid; replaying after a paid state
+    // is a no-op but still returns success so EPay stops retrying.
+    await db
+      .update(payments)
+      .set({
+        status: "paid",
+        paidAt: new Date(),
+        epayTradeNo: params.trade_no ?? null,
+        epayOutTradeNo: orderId,
+      })
+      .where(and(eq(payments.id, orderId), eq(payments.status, "pending")));
+  } catch (err) {
+    console.error("[epay/notify] update failed:", err);
     return new NextResponse("db_error", { status: 500 });
   }
 

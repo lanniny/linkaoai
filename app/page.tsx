@@ -1,30 +1,27 @@
 import { ArrowRight, LayoutDashboard, LogIn, Sparkles, UserPlus } from "lucide-react";
 import Link from "next/link";
 
+import { headers } from "next/headers";
+
 import FeaturesGrid from "@/app/components/marketing/FeaturesGrid";
 import Footer from "@/app/components/marketing/Footer";
 import Hero from "@/app/components/marketing/Hero";
 import PricingCard from "@/app/components/marketing/PricingCard";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-async function getSession() {
-  if (!isSupabaseConfigured()) return null;
+async function getViewerUser() {
   try {
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    return user;
+    const session = await auth.api.getSession({ headers: await headers() });
+    return session?.user ?? null;
   } catch {
     return null;
   }
 }
 
 export default async function HomePage() {
-  const user = await getSession();
+  const user = await getViewerUser();
 
   return (
     <>

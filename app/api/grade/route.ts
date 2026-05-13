@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { attempts } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import { gradeRequestSchema, gradeResultSchema } from "@/lib/types";
 
@@ -171,23 +172,21 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
     const ctx = await getPersistContext();
     if (ctx && parsed.data.question_db_id) {
       try {
-        const { data: row, error: attErr } = await ctx.supabase
-          .from("attempts")
-          .insert({
-            question_id: parsed.data.question_db_id,
-            user_id: ctx.user_id,
-            user_answer: user_answer,
-            is_correct: validated.data.is_correct,
-            ai_score: validated.data.ai_score,
-            ai_feedback: validated.data.ai_feedback,
-            graded_by: response.model,
+        const [row] = await ctx.db
+          .insert(attempts)
+          .values({
+            questionId: parsed.data.question_db_id,
+            userId: ctx.user_id,
+            userAnswer: user_answer,
+            isCorrect: validated.data.is_correct,
+            aiScore: validated.data.ai_score,
+            aiFeedback: validated.data.ai_feedback,
+            errorTags: validated.data.error_tags ?? null,
+            nextStepHint: validated.data.next_step_hint ?? null,
           })
-          .select("id")
-          .single();
-        if (!attErr && row) {
+          .returning({ id: attempts.id });
+        if (row) {
           persisted = { attempt_id: row.id };
-        } else if (attErr) {
-          console.warn("[/api/grade] attempt insert failed:", attErr);
         }
       } catch (err) {
         console.warn("[/api/grade] persistence threw:", err);

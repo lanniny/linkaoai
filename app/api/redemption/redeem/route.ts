@@ -1,22 +1,15 @@
 import "server-only";
 
+import { and, eq, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
+import { db, payments, redemptionCodes } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { isSupabaseAdminConfigured } from "@/lib/supabase/config";
 import { redemptionRedeemRequestSchema } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  if (!isSupabaseAdminConfigured()) {
-    return NextResponse.json(
-      { error: "兑换码功能尚未开通（Supabase 未配置）" },
-      { status: 503 },
-    );
-  }
-
   const ctx = await getPersistContext();
   if (!ctx) {
     return NextResponse.json(
@@ -44,20 +37,22 @@ export async function POST(req: NextRequest) {
   }
   const code = parsed.data.code.trim().toUpperCase();
 
-  const admin = createSupabaseAdminClient();
+  // 1. Lookup code (case-insensitive via UPPER())
+  const [codeRow] = await db
+    .select({
+      id: redemptionCodes.id,
+      code: redemptionCodes.code,
+      subject: redemptionCodes.subject,
+      amountCny: redemptionCodes.amountCny,
+      status: redemptionCodes.status,
+      expiresAt: redemptionCodes.expiresAt,
+    })
+    .from(redemptionCodes)
+    .where(sql`UPPER(${redemptionCodes.code}) = ${code}`)
+    .limit(1);
 
-  // 1. Look up active code
-  const { data: codeRow, error: lookupErr } = await admin
-    .from("redemption_codes")
-    .select("id, code, subject, amount_cny, status, expires_at")
-    .ilike("code", code)
-    .single();
-
-  if (lookupErr || !codeRow) {
-    return NextResponse.json(
-      { error: "兑换码不存在" },
-      { status: 404 },
-    );
+  if (!codeRow) {
+    return NextResponse.json({ error: "兑换码不存在" }, { status: 404 });
   }
   if (codeRow.status !== "active") {
     return NextResponse.json(
@@ -65,62 +60,67 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  if (codeRow.expires_at && new Date(codeRow.expires_at) < new Date()) {
-    // Lazy-mark expired so subsequent lookups short-circuit fast
-    await admin
-      .from("redemption_codes")
-      .update({ status: "expired" })
-      .eq("id", codeRow.id);
-    return NextResponse.json(
-      { error: "兑换码已过期" },
-      { status: 400 },
-    );
+  if (codeRow.expiresAt && new Date(codeRow.expiresAt) < new Date()) {
+    await db
+      .update(redemptionCodes)
+      .set({ status: "expired" })
+      .where(eq(redemptionCodes.id, codeRow.id));
+    return NextResponse.json({ error: "兑换码已过期" }, { status: 400 });
   }
 
-  // 2. Atomically mark code as used (CAS on status='active')
-  const usedAt = new Date().toISOString();
-  const { data: claimed, error: claimErr } = await admin
-    .from("redemption_codes")
-    .update({
+  // 2. Atomic CAS: only flip active → used; rowsAffected tells us if we won.
+  const usedAt = new Date();
+  const claimResult = await db
+    .update(redemptionCodes)
+    .set({
       status: "used",
-      used_by: ctx.user_id,
-      used_at: usedAt,
+      usedBy: ctx.user_id,
+      usedAt,
     })
-    .eq("id", codeRow.id)
-    .eq("status", "active")
-    .select("id")
-    .single();
+    .where(
+      and(eq(redemptionCodes.id, codeRow.id), eq(redemptionCodes.status, "active")),
+    )
+    .returning({ id: redemptionCodes.id });
 
-  if (claimErr || !claimed) {
-    // Lost the race: someone else claimed it between lookup and update
+  if (claimResult.length === 0) {
     return NextResponse.json(
       { error: "兑换码刚刚被使用，请换一张" },
       { status: 409 },
     );
   }
 
-  // 3. Insert paid payment row as audit trail / unlock signal
-  const { data: payment, error: payErr } = await admin
-    .from("payments")
-    .insert({
-      user_id: ctx.user_id,
-      subject: codeRow.subject,
-      amount_cny: codeRow.amount_cny,
-      channel: "redemption_code",
-      status: "paid",
-      paid_at: usedAt,
-      external_ref: codeRow.code,
-      notes: `redemption_code_id=${codeRow.id}`,
-    })
-    .select("id, subject, amount_cny, status, channel, created_at")
-    .single();
+  // 3. Insert paid payment row as audit trail + unlock signal.
+  try {
+    const [payment] = await db
+      .insert(payments)
+      .values({
+        userId: ctx.user_id,
+        subject: codeRow.subject,
+        amountCny: codeRow.amountCny,
+        channel: "redemption_code",
+        status: "paid",
+        paidAt: usedAt,
+        notes: `redemption_code_id=${codeRow.id}`,
+      })
+      .returning({
+        id: payments.id,
+        subject: payments.subject,
+        amountCny: payments.amountCny,
+        status: payments.status,
+        channel: payments.channel,
+        createdAt: payments.createdAt,
+      });
 
-  if (payErr) {
-    // Don't unclaim — code is genuinely consumed; surface to founder so
-    // they can manually rebuild the audit row if needed.
+    return NextResponse.json({
+      success: true,
+      subject: codeRow.subject,
+      amount_cny: codeRow.amountCny,
+      payment,
+    });
+  } catch (err) {
     console.error(
       "[/api/redemption/redeem] payment insert failed after code claimed:",
-      payErr,
+      err,
     );
     return NextResponse.json(
       {
@@ -130,11 +130,4 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
-
-  return NextResponse.json({
-    success: true,
-    subject: codeRow.subject,
-    amount_cny: codeRow.amount_cny,
-    payment,
-  });
 }

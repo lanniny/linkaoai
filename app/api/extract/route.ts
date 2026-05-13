@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { courses, knowledgePoints } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import { outlineSchema, subjectSchema } from "@/lib/types";
 
@@ -186,55 +187,53 @@ export async function POST(req: NextRequest) {
     const ctx = await getPersistContext();
     if (ctx) {
       try {
-        const { data: course, error: courseErr } = await ctx.supabase
-          .from("courses")
-          .insert({
-            user_id: ctx.user_id,
+        const [course] = await ctx.db
+          .insert(courses)
+          .values({
+            userId: ctx.user_id,
             subject: validated.data.subject,
-            source_title: validated.data.source_title,
-            file_size_bytes: buffer.length,
-            status: "ready",
-            extract_meta: {
+            sourceTitle: validated.data.source_title,
+            sourceMeta: {
               model: response.model,
               usage: response.usage,
               stop_reason: response.stop_reason,
+              file_size_bytes: buffer.length,
             },
           })
-          .select("id")
-          .single();
+          .returning({ id: courses.id });
 
-        if (!courseErr && course) {
-          // Insert KPs in original order; capture returned UUIDs to map
-          // user-facing string ids (kp-1, kp-2, ...) -> DB UUIDs so
+        if (course) {
+          // Insert KPs in original order; capture returned ids to map
+          // user-facing string ids (kp-1, kp-2, ...) -> DB ids so
           // downstream routes (generate-questions, grade) can link back.
           const kpRows = validated.data.topics.map((t, i) => ({
-            course_id: course.id,
-            user_id: ctx.user_id,
+            courseId: course.id,
+            userId: ctx.user_id,
+            kpKey: t.id,
             ordinal: i,
             title: t.title,
             level: t.level,
             explanation: t.explanation,
             prerequisites: t.prerequisites ?? null,
-            estimated_minutes: t.estimated_minutes ?? null,
+            estimatedMinutes: t.estimated_minutes ?? null,
           }));
-          const { data: insertedKps, error: kpErr } = await ctx.supabase
-            .from("knowledge_points")
-            .insert(kpRows)
-            .select("id, ordinal");
+          const insertedKps = await ctx.db
+            .insert(knowledgePoints)
+            .values(kpRows)
+            .returning({
+              id: knowledgePoints.id,
+              ordinal: knowledgePoints.ordinal,
+            });
 
           const kpIdMap: Record<string, string> = {};
-          if (!kpErr && insertedKps) {
-            insertedKps.forEach((row) => {
-              const userFacingId = validated.data.topics[row.ordinal]?.id;
-              if (userFacingId) kpIdMap[userFacingId] = row.id;
-            });
-          }
+          insertedKps.forEach((row) => {
+            const userFacingId = validated.data.topics[row.ordinal]?.id;
+            if (userFacingId) kpIdMap[userFacingId] = row.id;
+          });
           persisted = {
             course_id: course.id,
             knowledge_point_id_map: kpIdMap,
           };
-        } else if (courseErr) {
-          console.warn("[/api/extract] course insert failed:", courseErr);
         }
       } catch (err) {
         console.warn("[/api/extract] persistence threw:", err);
