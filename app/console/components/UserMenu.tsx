@@ -1,10 +1,12 @@
 "use client";
 
-import { ChevronDown, LogOut, Settings } from "lucide-react";
+import { ChevronDown, LogOut, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-export function UserMenu({ email }: { email: string }) {
+import { roleLabel, type Role } from "@/lib/admin";
+
+export function UserMenu({ email, role }: { email: string; role: Role }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,10 +37,33 @@ export function UserMenu({ email }: { email: string }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-56 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 text-sm shadow-lg">
-          <div className="border-b border-zinc-100 px-3 py-2 text-[11px] text-zinc-500">
-            登录为 <span className="font-mono text-zinc-700">{email}</span>
+        <div className="absolute right-0 top-full z-20 mt-2 w-60 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 text-sm shadow-lg">
+          <div className="border-b border-zinc-100 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[11px] text-zinc-700">{email}</span>
+              <span
+                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                  role === 10
+                    ? "bg-red-100 text-red-700"
+                    : role === 1
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-zinc-100 text-zinc-600"
+                }`}
+              >
+                {roleLabel(role)}
+              </span>
+            </div>
           </div>
+          {role >= 1 && (
+            <Link
+              href="/console/admin"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-3 py-2 text-red-700 transition hover:bg-red-50"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              管理后台
+            </Link>
+          )}
           <Link
             href="/console/settings"
             onClick={() => setOpen(false)}

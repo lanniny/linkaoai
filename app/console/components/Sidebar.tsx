@@ -7,13 +7,19 @@ import {
   CreditCard,
   History,
   PenLine,
+  Receipt,
   Settings,
+  ShieldCheck,
   Sparkles,
+  TicketCheck,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const items = [
+import type { Role } from "@/lib/admin";
+
+const userItems = [
   { href: "/console", label: "概览", icon: BarChart3 },
   { href: "/console/courses", label: "我的课件", icon: BookOpenText },
   { href: "/console/practice", label: "出题练习", icon: PenLine },
@@ -23,8 +29,16 @@ const items = [
   { href: "/console/settings", label: "个人设置", icon: Settings },
 ];
 
-export function Sidebar() {
+const adminItems = [
+  { href: "/console/admin", label: "管理概览", icon: ShieldCheck },
+  { href: "/console/admin/users", label: "用户管理", icon: Users },
+  { href: "/console/admin/orders", label: "订单管理", icon: Receipt },
+  { href: "/console/admin/codes", label: "兑换码", icon: TicketCheck },
+];
+
+export function Sidebar({ role }: { role: Role }) {
   const path = usePathname();
+  const showAdmin = role >= 1;
 
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-zinc-200 bg-white sm:flex">
@@ -41,8 +55,8 @@ export function Sidebar() {
         </span>
       </Link>
 
-      <nav className="flex-1 space-y-0.5 p-3 text-sm">
-        {items.map(({ href, label, icon: Icon }) => {
+      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3 text-sm">
+        {userItems.map(({ href, label, icon: Icon }) => {
           const isActive =
             href === "/console"
               ? path === "/console"
@@ -62,6 +76,42 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {showAdmin && (
+          <>
+            <div className="mt-4 flex items-center gap-2 px-3 pb-1 pt-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                管理员
+              </span>
+              <span className="h-px flex-1 bg-zinc-200" />
+              {role === 10 && (
+                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700">
+                  ROOT
+                </span>
+              )}
+            </div>
+            {adminItems.map(({ href, label, icon: Icon }) => {
+              const isActive =
+                href === "/console/admin"
+                  ? path === "/console/admin"
+                  : path === href || (path?.startsWith(href + "/") ?? false);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 transition ${
+                    isActive
+                      ? "bg-red-600 text-white shadow-sm"
+                      : "text-zinc-700 hover:bg-red-50 hover:text-red-700"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{label}</span>
+                </Link>
+              );
+            })}
+          </>
+        )}
       </nav>
 
       <div className="border-t border-zinc-200 p-3">
