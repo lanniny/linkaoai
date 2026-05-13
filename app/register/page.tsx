@@ -60,7 +60,7 @@ export default function RegisterPage() {
       if (data.session) {
         toast.success("注册成功，已登录");
         setTimeout(() => {
-          window.location.href = "/";
+          window.location.href = "/console";
         }, 1200);
       } else {
         toast.success("注册成功", {
@@ -192,10 +192,10 @@ export default function RegisterPage() {
               没启用则已自动登录，3 秒后回到首页。
             </p>
             <Link
-              href="/"
+              href="/console"
               className="mt-4 inline-flex items-center gap-1 rounded bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800"
             >
-              立即去首页
+              立即去控制台
               <ArrowRight className="h-3 w-3" />
             </Link>
           </div>

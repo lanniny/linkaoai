@@ -63,7 +63,7 @@ export default function LoginPage() {
       if (error) throw error;
       toast.success("登录成功");
       const next = new URLSearchParams(window.location.search).get("next");
-      window.location.href = next ?? "/";
+      window.location.href = next ?? "/console";
     } catch (err) {
       toast.error("登录失败", {
         description: err instanceof Error ? err.message : "未知错误",

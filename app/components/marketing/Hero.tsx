@@ -31,23 +31,23 @@ export default function Hero() {
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <a
-            href="#workspace"
+            href="/register"
             className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
           >
-            立即开始（免费试用）
+            立即注册（30 秒上手）
             <ArrowRight className="h-4 w-4" />
           </a>
           <a
-            href="/pay"
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-5 py-2.5 text-sm font-medium text-amber-800 transition hover:bg-amber-50"
+            href="/login"
+            className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            19.9 元 / 科 · 挂科退款
+            已有账号 · 登录
           </a>
         </div>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs text-zinc-500">
-          <span>✓ 不用注册也能用</span>
-          <span>✓ 试用永久免费</span>
-          <span>✓ 挂科全额退款</span>
+          <span>✓ 邮箱注册 · 免邀请码</span>
+          <span>✓ 19.9 元 / 科 · 挂科退款</span>
+          <span>✓ 永久访问 · 不限次</span>
           <span>✓ AI 仅供参考，以教材为准</span>
         </div>
       </div>

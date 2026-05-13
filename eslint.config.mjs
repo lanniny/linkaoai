@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Skip stale Claude worktrees and their build artifacts.
+    ".claude/**",
   ]),
 ]);
 
