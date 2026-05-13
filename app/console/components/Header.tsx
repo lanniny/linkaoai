@@ -18,6 +18,8 @@ const labels: Record<string, string> = {
   "/console/admin/users": "用户管理",
   "/console/admin/orders": "订单管理",
   "/console/admin/codes": "兑换码管理",
+  "/console/admin/logs": "AI 调用日志",
+  "/console/admin/settings": "系统设置",
 };
 
 const subtitles: Record<string, string> = {
@@ -32,6 +34,8 @@ const subtitles: Record<string, string> = {
   "/console/admin/users": "全部注册用户 · 角色 · 解锁状态",
   "/console/admin/orders": "全部订单 · 手动标记 paid",
   "/console/admin/codes": "批量生成 · 全部兑换码",
+  "/console/admin/logs": "Token 消费 · 错误率 · 路由过滤",
+  "/console/admin/settings": "定价 / 配额 / 维护开关 / 公告",
 };
 
 export function Header({

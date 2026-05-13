@@ -5,10 +5,12 @@ import {
   BookOpenText,
   CalendarRange,
   CreditCard,
+  FileBarChart,
   History,
   PenLine,
   Receipt,
   Settings,
+  Settings2,
   ShieldCheck,
   Sparkles,
   TicketCheck,
@@ -34,6 +36,8 @@ const adminItems = [
   { href: "/console/admin/users", label: "用户管理", icon: Users },
   { href: "/console/admin/orders", label: "订单管理", icon: Receipt },
   { href: "/console/admin/codes", label: "兑换码", icon: TicketCheck },
+  { href: "/console/admin/logs", label: "AI 日志", icon: FileBarChart },
+  { href: "/console/admin/settings", label: "系统设置", icon: Settings2 },
 ];
 
 export function Sidebar({ role }: { role: Role }) {
