@@ -1,39 +1,13 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
-  // If Supabase env not set yet (e.g., before Day-1 account registration),
-  // skip silently so dev mode still boots.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.next({ request });
-  }
-
-  let supabaseResponse = NextResponse.next({ request });
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value),
-        );
-        supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options),
-        );
-      },
-    },
-  });
-
-  // Refresh session for Server Components — IMPORTANT: must be the first
-  // call after createServerClient(). Do not insert other code in between.
-  await supabase.auth.getUser();
-
-  return supabaseResponse;
+// Next.js middleware. Better-auth manages its own session cookie refresh on
+// /api/auth/* requests, so we no longer need a Supabase-style session warm-up
+// here.
+//
+// Kept as a thin pass-through so future cross-cutting needs (maintenance
+// mode 503, rate limits, redirect rules) have a hook ready.
+export async function proxy(_request: NextRequest) {
+  return NextResponse.next();
 }
 
 export const config = {
