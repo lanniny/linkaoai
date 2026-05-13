@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { sprintPlans } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import {
@@ -84,6 +85,8 @@ function todayISO(): string {
 }
 
 export async function POST(req: NextRequest) {
+  let userIdForLog: string | null = null;
+  let aiStartedAt = 0;
   try {
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -147,6 +150,11 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
 
 请基于以上信息生成 ${totalDays} 天逐日冲刺计划，严格按 system prompt 的规划准则。输出 JSON（无 markdown 包裹）。`;
 
+    aiStartedAt = Date.now();
+    try {
+      userIdForLog = (await getPersistContext())?.user_id ?? null;
+    } catch {}
+
     const response = await anthropic.messages.create({
       model: MODELS.bulk,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -159,6 +167,17 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       ],
       messages: [{ role: "user", content: userText }],
     });
+
+    void emitAiUsage({
+      userId: userIdForLog,
+      route: "sprint_plan",
+      model: response.model,
+      status: "success",
+      latencyMs: Date.now() - aiStartedAt,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
+    if (userIdForLog) void incUsageCounter(userIdForLog, "sprint_plan");
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",
@@ -252,6 +271,16 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
   } catch (err) {
     console.error("[/api/sprint-plan] error:", err);
     const message = err instanceof Error ? err.message : "unknown error";
+    if (aiStartedAt > 0) {
+      void emitAiUsage({
+        userId: userIdForLog,
+        route: "sprint_plan",
+        model: MODELS.bulk,
+        status: "error",
+        latencyMs: Date.now() - aiStartedAt,
+        errorMessage: message,
+      });
+    }
     return NextResponse.json(
       { error: "生成失败", message },
       { status: 500 },

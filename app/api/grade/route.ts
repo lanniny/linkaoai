@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { attempts } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import { gradeRequestSchema, gradeResultSchema } from "@/lib/types";
@@ -56,6 +57,8 @@ LaTeX 约定：所有 ai_feedback / next_step_hint 中的数学公式用 \`$...$
 - 输出必须是合法 JSON，不要包含任何 \`\`\` 或解释性前后缀`;
 
 export async function POST(req: NextRequest) {
+  let userIdForLog: string | null = null;
+  let aiStartedAt = 0;
   try {
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -106,6 +109,11 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
 
 请按 system prompt 中的判定准则，对学生答案给出严格 JSON 格式的批改结果。`;
 
+    aiStartedAt = Date.now();
+    try {
+      userIdForLog = (await getPersistContext())?.user_id ?? null;
+    } catch {}
+
     const response = await anthropic.messages.create({
       model: MODELS.bulk,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -123,6 +131,17 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
         },
       ],
     });
+
+    void emitAiUsage({
+      userId: userIdForLog,
+      route: "grade",
+      model: response.model,
+      status: "success",
+      latencyMs: Date.now() - aiStartedAt,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
+    if (userIdForLog) void incUsageCounter(userIdForLog, "grade");
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",
@@ -206,6 +225,16 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
   } catch (err) {
     console.error("[/api/grade] error:", err);
     const message = err instanceof Error ? err.message : "unknown error";
+    if (aiStartedAt > 0) {
+      void emitAiUsage({
+        userId: userIdForLog,
+        route: "grade",
+        model: MODELS.bulk,
+        status: "error",
+        latencyMs: Date.now() - aiStartedAt,
+        errorMessage: message,
+      });
+    }
     return NextResponse.json(
       { error: "批改失败", message },
       { status: 500 },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { courses, knowledgePoints } from "@/lib/db";
@@ -56,6 +57,8 @@ const SYSTEM_PROMPT = `你是临考（Linkao）的考点提取助手，专门帮
 - 输出必须是合法 JSON，不要包含任何 \`\`\` 或解释性前后缀`;
 
 export async function POST(req: NextRequest) {
+  let userIdForLog: string | null = null;
+  let aiStartedAt = 0;
   try {
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -97,6 +100,13 @@ export async function POST(req: NextRequest) {
 
     const base64 = buffer.toString("base64");
 
+    // M4 mirror — capture user id (best effort) and start time so we can
+    // emit one ai_usage_logs row whether the call succeeds or throws.
+    aiStartedAt = Date.now();
+    try {
+      userIdForLog = (await getPersistContext())?.user_id ?? null;
+    } catch {}
+
     const response = await anthropic.messages.create({
       model: MODELS.primary,
       // 8192 留足空间：22 条 topics × ~150 tokens 中文 ≈ 3.3K，加 notes/标题约 4K，留 2× 余量
@@ -133,6 +143,18 @@ export async function POST(req: NextRequest) {
         },
       ],
     });
+
+    // M4 mirror — fire-and-forget telemetry; never blocks the response.
+    void emitAiUsage({
+      userId: userIdForLog,
+      route: "extract",
+      model: response.model,
+      status: "success",
+      latencyMs: Date.now() - aiStartedAt,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
+    if (userIdForLog) void incUsageCounter(userIdForLog, "extract");
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",
@@ -252,6 +274,16 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[/api/extract] error:", err);
     const message = err instanceof Error ? err.message : "unknown error";
+    if (aiStartedAt > 0) {
+      void emitAiUsage({
+        userId: userIdForLog,
+        route: "extract",
+        model: MODELS.primary,
+        status: "error",
+        latencyMs: Date.now() - aiStartedAt,
+        errorMessage: message,
+      });
+    }
     return NextResponse.json(
       { error: "提取失败", message },
       { status: 500 },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
+import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { questions } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
 import {
@@ -80,6 +81,8 @@ LaTeX 约定：所有数学公式用 \`$...$\`（行内）或 \`$$...$$\`（块�
 - 输出必须是合法 JSON，不要包含任何 \`\`\` 或解释性前后缀`;
 
 export async function POST(req: NextRequest) {
+  let userIdForLog: string | null = null;
+  let aiStartedAt = 0;
   try {
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -158,6 +161,11 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
 - ${difficultyHint}
 - 严格输出 JSON（无 markdown 包裹），格式见 system prompt`;
 
+    aiStartedAt = Date.now();
+    try {
+      userIdForLog = (await getPersistContext())?.user_id ?? null;
+    } catch {}
+
     const response = await anthropic.messages.create({
       model: MODELS.bulk,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -175,6 +183,17 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
         },
       ],
     });
+
+    void emitAiUsage({
+      userId: userIdForLog,
+      route: "generate_questions",
+      model: response.model,
+      status: "success",
+      latencyMs: Date.now() - aiStartedAt,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
+    if (userIdForLog) void incUsageCounter(userIdForLog, "generate_questions");
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",
@@ -267,6 +286,16 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
   } catch (err) {
     console.error("[/api/generate-questions] error:", err);
     const message = err instanceof Error ? err.message : "unknown error";
+    if (aiStartedAt > 0) {
+      void emitAiUsage({
+        userId: userIdForLog,
+        route: "generate_questions",
+        model: MODELS.bulk,
+        status: "error",
+        latencyMs: Date.now() - aiStartedAt,
+        errorMessage: message,
+      });
+    }
     return NextResponse.json(
       { error: "生成失败", message },
       { status: 500 },

@@ -6,7 +6,9 @@ import { NextResponse, type NextRequest } from "next/server";
 //
 // Kept as a thin pass-through so future cross-cutting needs (maintenance
 // mode 503, rate limits, redirect rules) have a hook ready.
-export async function proxy(_request: NextRequest) {
+export function proxy(request: NextRequest): Response {
+  // Touch the request object once so the parameter is considered used.
+  void request;
   return NextResponse.next();
 }
 
