@@ -5,7 +5,9 @@ import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { courses, knowledgePoints } from "@/lib/db";
+import { assertNotMaintenance } from "@/lib/maintenance";
 import { getPersistContext } from "@/lib/persistence";
+import { checkQuota } from "@/lib/quota";
 import { outlineSchema, subjectSchema } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -60,6 +62,10 @@ export async function POST(req: NextRequest) {
   let userIdForLog: string | null = null;
   let aiStartedAt = 0;
   try {
+    // M8 maintenance gate (admin routes do not check this).
+    const maintGuard = await assertNotMaintenance();
+    if (maintGuard) return maintGuard;
+
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json(
@@ -106,6 +112,19 @@ export async function POST(req: NextRequest) {
     try {
       userIdForLog = (await getPersistContext())?.user_id ?? null;
     } catch {}
+
+    // M2 mirror — free-tier monthly quota check (paid users bypass).
+    const quota = await checkQuota(userIdForLog, "extract");
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: "quota_exceeded",
+          message: `本月免费提取配额已用尽（${quota.used}/${quota.limit}）· 解锁单科可不限次`,
+          quota,
+        },
+        { status: 429 },
+      );
+    }
 
     const response = await anthropic.messages.create({
       model: MODELS.primary,

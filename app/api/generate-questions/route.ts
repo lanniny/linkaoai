@@ -4,7 +4,9 @@ import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { questions } from "@/lib/db";
+import { assertNotMaintenance } from "@/lib/maintenance";
 import { getPersistContext } from "@/lib/persistence";
+import { checkQuota } from "@/lib/quota";
 import {
   generateQuestionsRequestSchema,
   questionsBatchSchema,
@@ -84,6 +86,9 @@ export async function POST(req: NextRequest) {
   let userIdForLog: string | null = null;
   let aiStartedAt = 0;
   try {
+    const maintGuard = await assertNotMaintenance();
+    if (maintGuard) return maintGuard;
+
     assertOfficialEndpoint();
     if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json(
@@ -165,6 +170,18 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
     try {
       userIdForLog = (await getPersistContext())?.user_id ?? null;
     } catch {}
+
+    const quota = await checkQuota(userIdForLog, "generate_questions");
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: "quota_exceeded",
+          message: `本月免费出题配额已用尽（${quota.used}/${quota.limit}）· 解锁单科可不限次`,
+          quota,
+        },
+        { status: 429 },
+      );
+    }
 
     const response = await anthropic.messages.create({
       model: MODELS.bulk,
