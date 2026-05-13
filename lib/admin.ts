@@ -36,17 +36,20 @@ function normalizeRole(raw: unknown): Role | null {
 
 export function getUserRole(user: RoleUser | null | undefined): Role {
   if (!user) return 0;
-  // Prefer the new direct `user.role` (better-auth);
-  // fall back to legacy Supabase `app_metadata.role` during migration.
-  const fromDirect = normalizeRole(user.role);
-  if (fromDirect !== null) return fromDirect;
-  const fromMeta = normalizeRole(user.app_metadata?.role);
-  if (fromMeta !== null && fromMeta > 0) return fromMeta;
 
-  // Bootstrap fallback: ROOT_ADMIN_EMAIL is always treated as root.
+  // Bootstrap takes precedence: ROOT_ADMIN_EMAIL is always treated as root,
+  // even if the DB row still has role=0 from initial signup. Without this
+  // priority, a fresh user.role=0 would short-circuit before the email
+  // fallback ever ran, leaving the founder locked out of admin pages.
   if (ROOT_EMAIL && user.email && user.email.toLowerCase() === ROOT_EMAIL) {
     return 10;
   }
+
+  // Otherwise prefer the new direct `user.role` (better-auth) and fall back
+  // to legacy Supabase `app_metadata.role` if we are mid-migration.
+  const fromDirect = normalizeRole(user.role);
+  if (fromDirect !== null) return fromDirect;
+  const fromMeta = normalizeRole(user.app_metadata?.role);
   return fromMeta ?? 0;
 }
 
