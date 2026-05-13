@@ -1,7 +1,8 @@
+import { desc, eq, inArray, and, type SQL } from "drizzle-orm";
 import { FileBarChart, Filter } from "lucide-react";
 import Link from "next/link";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { aiUsageLogs, db, user } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,13 +21,13 @@ const ROUTE_LABEL: Record<string, string> = {
   sprint_plan: "冲刺计划",
 };
 
-function fmtDate(s: string | null): string {
+function fmtDate(s: Date | string | null): string {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
@@ -44,37 +45,36 @@ export default async function AdminLogsPage({ searchParams }: PageProps) {
   const filterStatus = sp.status ?? "";
   const filterUser = sp.user ?? "";
 
-  const admin = createSupabaseAdminClient();
+  const conds: SQL[] = [];
+  if (filterRoute) conds.push(eq(aiUsageLogs.route, filterRoute));
+  if (filterStatus) conds.push(eq(aiUsageLogs.status, filterStatus));
+  if (filterUser) conds.push(eq(aiUsageLogs.userId, filterUser));
 
-  let query = admin
-    .from("ai_usage_logs")
-    .select(
-      "id, user_id, route, model, status, latency_ms, prompt_tokens, completion_tokens, cost_cny, error_message, created_at",
-    )
-    .order("created_at", { ascending: false })
+  const logs = await db
+    .select()
+    .from(aiUsageLogs)
+    .where(conds.length > 0 ? and(...conds) : undefined)
+    .orderBy(desc(aiUsageLogs.createdAt))
     .limit(200);
 
-  if (filterRoute) query = query.eq("route", filterRoute);
-  if (filterStatus) query = query.eq("status", filterStatus);
-  if (filterUser) query = query.eq("user_id", filterUser);
-
-  const [logsRes, usersRes] = await Promise.all([
-    query,
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
-
-  const logs = logsRes.data ?? [];
-  const userEmailMap = new Map(
-    (usersRes.data?.users ?? []).map((u) => [u.id, u.email ?? ""]),
+  const userIds = Array.from(
+    new Set(logs.map((l) => l.userId).filter((x): x is string => !!x)),
   );
+  const users =
+    userIds.length > 0
+      ? await db
+          .select({ id: user.id, email: user.email })
+          .from(user)
+          .where(inArray(user.id, userIds))
+      : [];
+  const emailMap = new Map(users.map((u) => [u.id, u.email]));
 
-  // Aggregates over the visible window
   const totals = logs.reduce(
     (acc, l) => {
       acc.count += 1;
-      acc.prompt += Number(l.prompt_tokens) || 0;
-      acc.completion += Number(l.completion_tokens) || 0;
-      acc.cost += Number(l.cost_cny) || 0;
+      acc.prompt += Number(l.promptTokens) || 0;
+      acc.completion += Number(l.completionTokens) || 0;
+      acc.cost += Number(l.costCny) || 0;
       if (l.status !== "success") acc.errorCount += 1;
       return acc;
     },
@@ -115,7 +115,9 @@ export default async function AdminLogsPage({ searchParams }: PageProps) {
         </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
           <div className="text-xs text-zinc-500">失败</div>
-          <div className="text-2xl font-bold text-red-700">{totals.errorCount}</div>
+          <div className="text-2xl font-bold text-red-700">
+            {totals.errorCount}
+          </div>
         </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
           <div className="text-xs text-zinc-500">输入 tokens</div>
@@ -203,7 +205,9 @@ export default async function AdminLogsPage({ searchParams }: PageProps) {
               <th className="px-3 py-2 text-left font-medium">Model</th>
               <th className="px-3 py-2 text-left font-medium">状态</th>
               <th className="px-3 py-2 text-right font-medium">耗时</th>
-              <th className="px-3 py-2 text-right font-medium">Tokens (in / out)</th>
+              <th className="px-3 py-2 text-right font-medium">
+                Tokens (in / out)
+              </th>
               <th className="px-3 py-2 text-right font-medium">成本</th>
             </tr>
           </thead>
@@ -211,11 +215,11 @@ export default async function AdminLogsPage({ searchParams }: PageProps) {
             {logs.map((l) => (
               <tr key={l.id} className="hover:bg-zinc-50/60">
                 <td className="px-3 py-2 font-mono text-[10px] text-zinc-500">
-                  {fmtDate(l.created_at)}
+                  {fmtDate(l.createdAt)}
                 </td>
                 <td className="px-3 py-2 font-mono">
-                  {l.user_id
-                    ? userEmailMap.get(l.user_id) ?? l.user_id.slice(0, 8) + "…"
+                  {l.userId
+                    ? emailMap.get(l.userId) ?? l.userId.slice(0, 8) + "…"
                     : "—"}
                 </td>
                 <td className="px-3 py-2">
@@ -232,21 +236,24 @@ export default async function AdminLogsPage({ searchParams }: PageProps) {
                   >
                     {l.status}
                   </span>
-                  {l.error_message && (
-                    <div className="mt-0.5 max-w-[220px] truncate text-[10px] text-red-600" title={l.error_message}>
-                      {l.error_message}
+                  {l.errorMessage && (
+                    <div
+                      className="mt-0.5 max-w-[220px] truncate text-[10px] text-red-600"
+                      title={l.errorMessage}
+                    >
+                      {l.errorMessage}
                     </div>
                   )}
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-[10px] text-zinc-600">
-                  {l.latency_ms != null ? `${l.latency_ms}ms` : "—"}
+                  {l.latencyMs != null ? `${l.latencyMs}ms` : "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-[10px] text-zinc-600">
-                  {l.prompt_tokens ?? "—"} / {l.completion_tokens ?? "—"}
+                  {l.promptTokens ?? "—"} / {l.completionTokens ?? "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-zinc-700">
-                  {l.cost_cny != null
-                    ? `¥${Number(l.cost_cny).toFixed(4)}`
+                  {l.costCny != null
+                    ? `¥${Number(l.costCny).toFixed(4)}`
                     : "—"}
                 </td>
               </tr>

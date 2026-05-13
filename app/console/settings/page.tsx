@@ -1,47 +1,48 @@
+import { and, eq } from "drizzle-orm";
 import { Calendar, LogOut, Mail, ShieldCheck, User2 } from "lucide-react";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { db, payments } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function fmtDate(s: string | null | undefined): string {
+function fmtDate(s: Date | string | null | undefined): string {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
 export default async function ConsoleSettingsPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) redirect("/login?next=/console/settings");
+  const user = session.user;
 
-  // unlocked subjects from paid payments
-  const { data: payments } = await supabase
-    .from("payments")
-    .select("subject, status, created_at")
-    .eq("status", "paid")
-    .order("created_at", { ascending: false });
-  const unlocked = Array.from(new Set((payments ?? []).map((p) => p.subject)));
+  const paidRows = await db
+    .select({ subject: payments.subject })
+    .from(payments)
+    .where(and(eq(payments.userId, user.id), eq(payments.status, "paid")));
+  const unlocked = Array.from(new Set(paidRows.map((p) => p.subject)));
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-6">
-      {/* Account card */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-4">
           <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-600 text-2xl font-bold text-white shadow-sm">
-            {(user?.email?.[0] ?? "?").toUpperCase()}
+            {(user.email?.[0] ?? "?").toUpperCase()}
           </span>
           <div>
             <h2 className="text-base font-semibold text-zinc-900">
-              {user?.email ?? "（未登录）"}
+              {user.email ?? "（未登录）"}
             </h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              UID <span className="font-mono">{user?.id?.slice(0, 8)}…</span>
+              UID <span className="font-mono">{user.id?.slice(0, 8)}…</span>
             </p>
           </div>
         </div>
@@ -52,7 +53,7 @@ export default async function ConsoleSettingsPage() {
               <Mail className="h-3 w-3" />
               邮箱
             </dt>
-            <dd className="font-mono text-zinc-700">{user?.email ?? "—"}</dd>
+            <dd className="font-mono text-zinc-700">{user.email ?? "—"}</dd>
           </div>
           <div className="flex items-center gap-3">
             <dt className="inline-flex w-28 items-center gap-1.5 text-zinc-500">
@@ -60,17 +61,15 @@ export default async function ConsoleSettingsPage() {
               邮箱已验证
             </dt>
             <dd className="text-zinc-700">
-              {user?.email_confirmed_at ? "✓ 已验证" : "✗ 未验证"}
+              {user.emailVerified ? "✓ 已验证" : "✗ 未验证"}
             </dd>
           </div>
           <div className="flex items-center gap-3">
             <dt className="inline-flex w-28 items-center gap-1.5 text-zinc-500">
               <User2 className="h-3 w-3" />
-              注册渠道
+              昵称
             </dt>
-            <dd className="text-zinc-700">
-              {user?.app_metadata?.provider ?? "—"}
-            </dd>
+            <dd className="text-zinc-700">{user.name ?? "—"}</dd>
           </div>
           <div className="flex items-center gap-3">
             <dt className="inline-flex w-28 items-center gap-1.5 text-zinc-500">
@@ -78,22 +77,12 @@ export default async function ConsoleSettingsPage() {
               创建时间
             </dt>
             <dd className="font-mono text-zinc-700">
-              {fmtDate(user?.created_at)}
-            </dd>
-          </div>
-          <div className="flex items-center gap-3">
-            <dt className="inline-flex w-28 items-center gap-1.5 text-zinc-500">
-              <Calendar className="h-3 w-3" />
-              上次登录
-            </dt>
-            <dd className="font-mono text-zinc-700">
-              {fmtDate(user?.last_sign_in_at)}
+              {fmtDate(user.createdAt)}
             </dd>
           </div>
         </dl>
       </section>
 
-      {/* Unlocked subjects */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold">🔓 已解锁学科</h2>
         {unlocked.length === 0 ? (
@@ -114,20 +103,19 @@ export default async function ConsoleSettingsPage() {
         )}
       </section>
 
-      {/* Security / actions */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold">🔧 账户操作</h2>
         <ul className="mt-3 space-y-2 text-sm">
           <li className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-3">
             <p className="font-medium">修改密码</p>
             <p className="mt-0.5 text-xs text-zinc-500">
-              暂未提供 · 主人可在 Supabase Dashboard → Auth → Users 重置
+              暂未提供 UI · 后续接入 better-auth changePassword
             </p>
           </li>
           <li className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-3">
-            <p className="font-medium">导出全部数据</p>
+            <p className="font-medium">个人访问令牌 (PAT)</p>
             <p className="mt-0.5 text-xs text-zinc-500">
-              暂未提供 · 后续会支持 JSON 一键导出
+              new-api M1 镜像 · 下个 Wave 上线
             </p>
           </li>
           <li className="rounded-lg border border-red-100 bg-red-50/60 p-3">

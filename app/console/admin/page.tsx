@@ -1,61 +1,85 @@
+import { and, desc, gte, isNull, sql } from "drizzle-orm";
 import { Banknote, Receipt, TicketCheck, Users } from "lucide-react";
 import Link from "next/link";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  courses,
+  db,
+  payments,
+  redemptionCodes,
+  user,
+} from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function fmtDate(s: string | null | undefined): string {
+function fmtDate(s: Date | string | null | undefined): string {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
 export default async function AdminOverviewPage() {
-  const admin = createSupabaseAdminClient();
+  // eslint-disable-next-line react-hooks/purity
+  const cutoff = new Date(Date.now() - 24 * 3600 * 1000);
 
-  const [usersRes, paymentsRes, codesRes, coursesRes] = await Promise.all([
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    admin.from("payments").select("amount_cny, status, channel, created_at"),
-    admin.from("redemption_codes").select("status, created_at"),
-    admin.from("courses").select("id, created_at").is("deleted_at", null),
+  const [
+    userCountRow,
+    newUsers24hRow,
+    paymentRows,
+    payments24hRow,
+    codeRows,
+    courseCountRow,
+    newCourses24hRow,
+    recentUsers,
+  ] = await Promise.all([
+    db.select({ n: sql<number>`count(*)` }).from(user),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(user)
+      .where(gte(user.createdAt, cutoff)),
+    db.select().from(payments).limit(1000),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(payments)
+      .where(gte(payments.createdAt, cutoff)),
+    db.select().from(redemptionCodes).limit(1000),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(courses)
+      .where(isNull(courses.deletedAt)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(courses)
+      .where(and(isNull(courses.deletedAt), gte(courses.createdAt, cutoff))),
+    db
+      .select({ id: user.id, email: user.email, createdAt: user.createdAt })
+      .from(user)
+      .orderBy(desc(user.createdAt))
+      .limit(5),
   ]);
 
-  const users = usersRes.data?.users ?? [];
-  const payments = paymentsRes.data ?? [];
-  const codes = codesRes.data ?? [];
-  const courses = coursesRes.data ?? [];
-
-  const paidPayments = payments.filter((p) => p.status === "paid");
+  const userCount = Number(userCountRow[0]?.n ?? 0);
+  const newUsers24h = Number(newUsers24hRow[0]?.n ?? 0);
+  const allPayments = paymentRows;
+  const paidPayments = allPayments.filter((p) => p.status === "paid");
+  const pendingCount = allPayments.filter((p) => p.status === "pending").length;
   const totalRevenue = paidPayments.reduce(
-    (s, p) => s + (Number(p.amount_cny) || 0),
+    (s, p) => s + (Number(p.amountCny) || 0),
     0,
   );
-  const pendingCount = payments.filter((p) => p.status === "pending").length;
-
-  // last 24h — server component renders once per request, so Date.now() is safe here.
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
-  const dayMs = 24 * 3600 * 1000;
-  const newUsers24h = users.filter(
-    (u) => u.created_at && now - new Date(u.created_at).getTime() < dayMs,
-  ).length;
-  const newPayments24h = payments.filter(
-    (p) => p.created_at && now - new Date(p.created_at).getTime() < dayMs,
-  ).length;
-  const newCourses24h = courses.filter(
-    (c) => c.created_at && now - new Date(c.created_at).getTime() < dayMs,
-  ).length;
+  const newPayments24h = Number(payments24hRow[0]?.n ?? 0);
+  const courseCount = Number(courseCountRow[0]?.n ?? 0);
+  const newCourses24h = Number(newCourses24hRow[0]?.n ?? 0);
 
   const codeStats = {
-    active: codes.filter((c) => c.status === "active").length,
-    used: codes.filter((c) => c.status === "used").length,
-    expired: codes.filter((c) => c.status === "expired").length,
+    active: codeRows.filter((c) => c.status === "active").length,
+    used: codeRows.filter((c) => c.status === "used").length,
+    expired: codeRows.filter((c) => c.status === "expired").length,
   };
 
   const channelBreakdown = paidPayments.reduce<Record<string, number>>(
@@ -67,17 +91,20 @@ export default async function AdminOverviewPage() {
     {},
   );
 
+  // silence unused course-count helper warnings
+  void courseCount;
+
   const stats = [
     {
       label: "总用户",
-      value: users.length,
+      value: userCount,
       delta: `+${newUsers24h} 今日`,
       icon: Users,
       tint: "bg-blue-50 text-blue-700",
     },
     {
       label: "总订单",
-      value: payments.length,
+      value: allPayments.length,
       delta: `${paidPayments.length} 已付 · ${pendingCount} 待处理`,
       icon: Receipt,
       tint: "bg-purple-50 text-purple-700",
@@ -91,24 +118,15 @@ export default async function AdminOverviewPage() {
     },
     {
       label: "兑换码",
-      value: codes.length,
+      value: codeRows.length,
       delta: `${codeStats.active} 可用 · ${codeStats.used} 已用`,
       icon: TicketCheck,
       tint: "bg-amber-50 text-amber-700",
     },
   ];
 
-  // recent registrations (top 5)
-  const recentUsers = [...users]
-    .sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    )
-    .slice(0, 5);
-
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      {/* Stat cards */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map(({ label, value, delta, icon: Icon, tint }) => (
           <div
@@ -130,7 +148,6 @@ export default async function AdminOverviewPage() {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Recent users */}
         <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-semibold">👥 最近注册</h2>
@@ -138,7 +155,7 @@ export default async function AdminOverviewPage() {
               href="/console/admin/users"
               className="text-xs text-zinc-500 underline-offset-2 hover:underline"
             >
-              全部 {users.length}
+              全部 {userCount}
             </Link>
           </div>
           {recentUsers.length === 0 && (
@@ -152,14 +169,13 @@ export default async function AdminOverviewPage() {
               >
                 <span className="truncate font-mono">{u.email}</span>
                 <span className="shrink-0 font-mono text-[10px] text-zinc-400">
-                  {fmtDate(u.created_at)}
+                  {fmtDate(u.createdAt)}
                 </span>
               </li>
             ))}
           </ul>
         </section>
 
-        {/* Payment channels */}
         <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-semibold">💰 渠道分布（已付）</h2>
@@ -183,8 +199,7 @@ export default async function AdminOverviewPage() {
                 >
                   <span className="font-mono">{ch}</span>
                   <span className="font-mono text-zinc-700">
-                    {n} 笔 ·{" "}
-                    {((n / paidPayments.length) * 100).toFixed(0)}%
+                    {n} 笔 · {((n / paidPayments.length) * 100).toFixed(0)}%
                   </span>
                 </li>
               ))}
@@ -192,7 +207,6 @@ export default async function AdminOverviewPage() {
         </section>
       </div>
 
-      {/* Today summary */}
       <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-amber-900">📊 24 小时摘要</h2>
         <div className="mt-2 grid grid-cols-3 gap-3 text-center text-xs">

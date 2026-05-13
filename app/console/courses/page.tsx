@@ -1,9 +1,14 @@
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { BookOpenText, Upload } from "lucide-react";
+import { headers } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { courses, db, knowledgePoints, questions } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const SUBJECT_STYLES: Record<string, string> = {
   高数: "bg-blue-100 text-blue-800 border-blue-200",
@@ -12,31 +17,58 @@ const SUBJECT_STYLES: Record<string, string> = {
   其他: "bg-zinc-100 text-zinc-700 border-zinc-200",
 };
 
-function fmtDate(s: string | null): string {
+function fmtDate(s: Date | string | null): string {
   if (!s) return "";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
 export default async function ConsoleCoursesPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select(
-      `id, subject, source_title, created_at,
-       knowledge_points(count),
-       questions(count)`,
-    )
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) redirect("/login?next=/console/courses");
+  const userId = session.user.id;
+
+  const courseRows = await db
+    .select({
+      id: courses.id,
+      subject: courses.subject,
+      sourceTitle: courses.sourceTitle,
+      createdAt: courses.createdAt,
+    })
+    .from(courses)
+    .where(and(eq(courses.userId, userId), isNull(courses.deletedAt)))
+    .orderBy(desc(courses.createdAt))
     .limit(100);
 
-  // Group by subject
-  const grouped = (courses ?? []).reduce<Record<string, typeof courses>>(
+  // counts by course
+  const courseIds = courseRows.map((c) => c.id);
+  let kpMap = new Map<string, number>();
+  let qMap = new Map<string, number>();
+  if (courseIds.length > 0) {
+    const inList = sql.join(
+      courseIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const kpRows = await db
+      .select({ cid: knowledgePoints.courseId, n: sql<number>`count(*)` })
+      .from(knowledgePoints)
+      .where(sql`${knowledgePoints.courseId} IN (${inList})`)
+      .groupBy(knowledgePoints.courseId);
+    const qRows = await db
+      .select({ cid: questions.courseId, n: sql<number>`count(*)` })
+      .from(questions)
+      .where(sql`${questions.courseId} IN (${inList})`)
+      .groupBy(questions.courseId);
+    kpMap = new Map(kpRows.map((r) => [String(r.cid), Number(r.n)]));
+    qMap = new Map(qRows.map((r) => [String(r.cid), Number(r.n)]));
+  }
+
+  // group by subject
+  const grouped = courseRows.reduce<Record<string, typeof courseRows>>(
     (acc, c) => {
       const k = c.subject ?? "其他";
       if (!acc[k]) acc[k] = [];
@@ -62,13 +94,7 @@ export default async function ConsoleCoursesPage() {
         </Link>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
-          ⚠️ 查询失败：{error.message}
-        </div>
-      )}
-
-      {!error && subjectKeys.length === 0 && (
+      {subjectKeys.length === 0 && (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center shadow-sm">
           <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100">
             <BookOpenText className="h-5 w-5 text-zinc-400" />
@@ -104,30 +130,24 @@ export default async function ConsoleCoursesPage() {
             </h2>
           </div>
           <ul className="divide-y divide-zinc-100">
-            {grouped[subj]!.map((c) => {
-              const kpCount =
-                (c.knowledge_points as unknown as { count: number }[])?.[0]?.count ?? 0;
-              const qCount =
-                (c.questions as unknown as { count: number }[])?.[0]?.count ?? 0;
-              return (
-                <li key={c.id}>
-                  <Link
-                    href={`/console/history/${c.id}`}
-                    className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-2 transition hover:bg-zinc-50"
-                  >
-                    <span className="flex-1 truncate text-sm font-medium text-zinc-800">
-                      {c.source_title}
-                    </span>
-                    <span className="shrink-0 text-xs text-zinc-500">
-                      📋 {kpCount} · 📝 {qCount}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] text-zinc-400">
-                      {fmtDate(c.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
+            {grouped[subj]!.map((c) => (
+              <li key={c.id}>
+                <Link
+                  href={`/console/history/${c.id}`}
+                  className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-2 transition hover:bg-zinc-50"
+                >
+                  <span className="flex-1 truncate text-sm font-medium text-zinc-800">
+                    {c.sourceTitle}
+                  </span>
+                  <span className="shrink-0 text-xs text-zinc-500">
+                    📋 {kpMap.get(c.id) ?? 0} · 📝 {qMap.get(c.id) ?? 0}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-zinc-400">
+                    {fmtDate(c.createdAt)}
+                  </span>
+                </Link>
+              </li>
+            ))}
           </ul>
         </section>
       ))}

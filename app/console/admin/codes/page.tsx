@@ -1,6 +1,7 @@
+import { desc, inArray } from "drizzle-orm";
 import { TicketCheck } from "lucide-react";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { db, redemptionCodes, user } from "@/lib/db";
 import { GenerateCodesForm } from "./GenerateCodesForm";
 
 export const runtime = "nodejs";
@@ -13,38 +14,40 @@ const STATUS_STYLES: Record<string, string> = {
   revoked: "bg-red-100 text-red-700",
 };
 
-function fmtDate(s: string | null): string {
+function fmtDate(s: Date | string | null): string {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
 export default async function AdminCodesPage() {
-  const admin = createSupabaseAdminClient();
+  const codeRows = await db
+    .select()
+    .from(redemptionCodes)
+    .orderBy(desc(redemptionCodes.createdAt))
+    .limit(200);
 
-  const [codesRes, usersRes] = await Promise.all([
-    admin
-      .from("redemption_codes")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
-
-  const codes = codesRes.data ?? [];
-  const userEmailMap = new Map(
-    (usersRes.data?.users ?? []).map((u) => [u.id, u.email ?? ""]),
+  const usedByIds = Array.from(
+    new Set(codeRows.map((c) => c.usedBy).filter((x): x is string => !!x)),
   );
+  const users =
+    usedByIds.length > 0
+      ? await db
+          .select({ id: user.id, email: user.email })
+          .from(user)
+          .where(inArray(user.id, usedByIds))
+      : [];
+  const emailMap = new Map(users.map((u) => [u.id, u.email]));
 
   const stats = {
-    active: codes.filter((c) => c.status === "active").length,
-    used: codes.filter((c) => c.status === "used").length,
-    expired: codes.filter((c) => c.status === "expired").length,
-    revoked: codes.filter((c) => c.status === "revoked").length,
+    active: codeRows.filter((c) => c.status === "active").length,
+    used: codeRows.filter((c) => c.status === "used").length,
+    expired: codeRows.filter((c) => c.status === "expired").length,
+    revoked: codeRows.filter((c) => c.status === "revoked").length,
   };
 
   return (
@@ -52,7 +55,7 @@ export default async function AdminCodesPage() {
       <header>
         <h2 className="flex items-center gap-1.5 text-sm font-semibold">
           <TicketCheck className="h-4 w-4" />
-          兑换码管理（{codes.length}）
+          兑换码管理（{codeRows.length}）
         </h2>
         <p className="text-xs text-zinc-500">
           批量生成给小红书 / 群友 / 推广合作 · 每个码绑一个学科
@@ -98,12 +101,12 @@ export default async function AdminCodesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 text-xs">
-            {codes.map((c) => (
+            {codeRows.map((c) => (
               <tr key={c.id} className="hover:bg-zinc-50/60">
                 <td className="px-3 py-2 font-mono font-semibold">{c.code}</td>
                 <td className="px-3 py-2">{c.subject}</td>
                 <td className="px-3 py-2 font-mono">
-                  ¥{Number(c.amount_cny).toFixed(2)}
+                  ¥{Number(c.amountCny).toFixed(2)}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -115,15 +118,15 @@ export default async function AdminCodesPage() {
                   </span>
                 </td>
                 <td className="px-3 py-2 font-mono text-[10px] text-zinc-500">
-                  {c.used_by ? userEmailMap.get(c.used_by) ?? "—" : "—"}
+                  {c.usedBy ? (emailMap.get(c.usedBy) ?? "—") : "—"}
                 </td>
                 <td className="px-3 py-2 font-mono text-[10px] text-zinc-400">
-                  {fmtDate(c.created_at)}
+                  {fmtDate(c.createdAt)}
                 </td>
                 <td className="px-3 py-2 text-zinc-600">{c.notes ?? "—"}</td>
               </tr>
             ))}
-            {codes.length === 0 && (
+            {codeRows.length === 0 && (
               <tr>
                 <td
                   colSpan={7}

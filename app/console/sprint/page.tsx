@@ -1,17 +1,22 @@
+import { desc, eq, inArray } from "drizzle-orm";
 import { CalendarRange, Sparkles } from "lucide-react";
+import { headers } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth";
+import { courses, db, sprintPlans } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function fmtDate(s: string | null): string {
+function fmtDate(s: Date | string | null): string {
   if (!s) return "";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
@@ -26,18 +31,45 @@ function daysFromNow(target: string): number {
 }
 
 export default async function ConsoleSprintPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data: plans, error } = await supabase
-    .from("sprint_plans")
-    .select(
-      "id, exam_date, total_days, daily_minutes, created_at, course_id, courses(source_title, subject)",
-    )
-    .order("created_at", { ascending: false })
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) redirect("/login?next=/console/sprint");
+  const userId = session.user.id;
+
+  const planRows = await db
+    .select({
+      id: sprintPlans.id,
+      examDate: sprintPlans.examDate,
+      totalDays: sprintPlans.totalDays,
+      dailyMinutes: sprintPlans.dailyMinutes,
+      createdAt: sprintPlans.createdAt,
+      courseId: sprintPlans.courseId,
+    })
+    .from(sprintPlans)
+    .where(eq(sprintPlans.userId, userId))
+    .orderBy(desc(sprintPlans.createdAt))
     .limit(50);
 
+  const courseIds = Array.from(
+    new Set(planRows.map((p) => p.courseId).filter((c): c is string => !!c)),
+  );
+  const courseMap = new Map<string, { sourceTitle: string; subject: string }>();
+  if (courseIds.length > 0) {
+    const rows = await db
+      .select({
+        id: courses.id,
+        sourceTitle: courses.sourceTitle,
+        subject: courses.subject,
+      })
+      .from(courses)
+      .where(inArray(courses.id, courseIds));
+    for (const r of rows) {
+      courseMap.set(r.id, { sourceTitle: r.sourceTitle, subject: r.subject });
+    }
+  }
+
   const today = new Date().toISOString().slice(0, 10);
-  const active = (plans ?? []).filter((p) => p.exam_date >= today);
-  const past = (plans ?? []).filter((p) => p.exam_date < today);
+  const active = planRows.filter((p) => p.examDate >= today);
+  const past = planRows.filter((p) => p.examDate < today);
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-6">
@@ -54,13 +86,7 @@ export default async function ConsoleSprintPage() {
         </Link>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
-          ⚠️ 查询失败：{error.message}
-        </div>
-      )}
-
-      {!error && (plans?.length ?? 0) === 0 && (
+      {planRows.length === 0 && (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center shadow-sm">
           <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
             <CalendarRange className="h-5 w-5 text-emerald-600" />
@@ -84,8 +110,8 @@ export default async function ConsoleSprintPage() {
           </h2>
           <ul className="space-y-2">
             {active.map((p) => {
-              const d = daysFromNow(p.exam_date);
-              const course = (p.courses as unknown as { source_title?: string; subject?: string } | null) ?? null;
+              const d = daysFromNow(p.examDate);
+              const course = p.courseId ? courseMap.get(p.courseId) : null;
               return (
                 <li
                   key={p.id}
@@ -93,18 +119,20 @@ export default async function ConsoleSprintPage() {
                 >
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-medium">
-                      {course?.source_title ?? "（独立计划）"}
+                      {course?.sourceTitle ?? "（独立计划）"}
                     </span>
                     <span className="shrink-0 rounded-full bg-emerald-700 px-2.5 py-0.5 text-[11px] font-medium text-white">
                       还有 {d} 天
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-zinc-600">
-                    考试日 <span className="font-mono">{p.exam_date}</span> · 共 {p.total_days} 天 · 每日 {p.daily_minutes} 分钟
-                    {course?.subject && <span className="ml-1 text-zinc-400">· {course.subject}</span>}
+                    考试日 <span className="font-mono">{p.examDate}</span> · 共 {p.totalDays} 天 · 每日 {p.dailyMinutes} 分钟
+                    {course?.subject && (
+                      <span className="ml-1 text-zinc-400">· {course.subject}</span>
+                    )}
                   </p>
                   <p className="mt-1 font-mono text-[10px] text-zinc-400">
-                    创建于 {fmtDate(p.created_at)}
+                    创建于 {fmtDate(p.createdAt)}
                   </p>
                 </li>
               );
@@ -120,17 +148,17 @@ export default async function ConsoleSprintPage() {
           </h2>
           <ul className="space-y-1.5 text-xs">
             {past.map((p) => {
-              const course = (p.courses as unknown as { source_title?: string; subject?: string } | null) ?? null;
+              const course = p.courseId ? courseMap.get(p.courseId) : null;
               return (
                 <li
                   key={p.id}
                   className="flex items-baseline justify-between gap-2 rounded-lg bg-zinc-50 px-2 py-1.5"
                 >
                   <span className="truncate">
-                    {course?.source_title ?? "（独立计划）"}
+                    {course?.sourceTitle ?? "（独立计划）"}
                   </span>
                   <span className="text-zinc-500">
-                    考试日 <span className="font-mono">{p.exam_date}</span> · {p.total_days} 天
+                    考试日 <span className="font-mono">{p.examDate}</span> · {p.totalDays} 天
                   </span>
                 </li>
               );

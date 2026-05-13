@@ -1,6 +1,7 @@
+import { desc, inArray } from "drizzle-orm";
 import { Receipt } from "lucide-react";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { db, payments, user } from "@/lib/db";
 import { OrderMarkPaidButton } from "./OrderMarkPaidButton";
 
 export const runtime = "nodejs";
@@ -21,39 +22,40 @@ const CHANNEL_LABEL: Record<string, string> = {
   redemption_code: "兑换码",
 };
 
-function fmtDate(s: string | null): string {
+function fmtDate(s: Date | string | null): string {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const d = s instanceof Date ? s : new Date(s);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   } catch {
-    return s;
+    return String(s);
   }
 }
 
 export default async function AdminOrdersPage() {
-  const admin = createSupabaseAdminClient();
+  const paymentRows = await db
+    .select()
+    .from(payments)
+    .orderBy(desc(payments.createdAt))
+    .limit(200);
 
-  const [paymentsRes, usersRes] = await Promise.all([
-    admin
-      .from("payments")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
-
-  const payments = paymentsRes.data ?? [];
-  const userEmailMap = new Map(
-    (usersRes.data?.users ?? []).map((u) => [u.id, u.email ?? ""]),
+  const userIds = Array.from(
+    new Set(paymentRows.map((p) => p.userId).filter(Boolean)),
   );
+  const users =
+    userIds.length > 0
+      ? await db
+          .select({ id: user.id, email: user.email })
+          .from(user)
+          .where(inArray(user.id, userIds))
+      : [];
+  const emailMap = new Map(users.map((u) => [u.id, u.email]));
 
-  // Aggregates
-  const totals = payments.reduce(
+  const totals = paymentRows.reduce(
     (acc, p) => {
       acc[p.status] = (acc[p.status] ?? 0) + 1;
       if (p.status === "paid") {
-        acc.revenue += Number(p.amount_cny) || 0;
+        acc.revenue += Number(p.amountCny) || 0;
       }
       return acc;
     },
@@ -68,7 +70,7 @@ export default async function AdminOrdersPage() {
       <header>
         <h2 className="flex items-center gap-1.5 text-sm font-semibold">
           <Receipt className="h-4 w-4" />
-          订单管理（{payments.length}）
+          订单管理（{paymentRows.length}）
         </h2>
         <p className="text-xs text-zinc-500">
           手动渠道（微信/支付宝）需 admin 手工标记为 paid 才解锁
@@ -117,17 +119,19 @@ export default async function AdminOrdersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 text-xs">
-            {payments.map((p) => (
+            {paymentRows.map((p) => (
               <tr key={p.id} className="hover:bg-zinc-50/60">
                 <td className="px-3 py-2 font-mono text-[10px] text-zinc-500">
                   {p.id.slice(0, 8)}…
                 </td>
                 <td className="px-3 py-2 font-mono">
-                  {userEmailMap.get(p.user_id) ?? p.user_id?.slice(0, 8) + "…"}
+                  {p.userId
+                    ? emailMap.get(p.userId) ?? p.userId.slice(0, 8) + "…"
+                    : "—"}
                 </td>
                 <td className="px-3 py-2">{p.subject}</td>
                 <td className="px-3 py-2 font-mono">
-                  ¥{Number(p.amount_cny).toFixed(2)}
+                  ¥{Number(p.amountCny).toFixed(2)}
                 </td>
                 <td className="px-3 py-2 text-zinc-600">
                   {CHANNEL_LABEL[p.channel] ?? p.channel}
@@ -142,7 +146,7 @@ export default async function AdminOrdersPage() {
                   </span>
                 </td>
                 <td className="px-3 py-2 font-mono text-[10px] text-zinc-400">
-                  {fmtDate(p.created_at)}
+                  {fmtDate(p.createdAt)}
                 </td>
                 <td className="px-3 py-2 text-right">
                   {p.status === "pending" && (
@@ -151,7 +155,7 @@ export default async function AdminOrdersPage() {
                 </td>
               </tr>
             ))}
-            {payments.length === 0 && (
+            {paymentRows.length === 0 && (
               <tr>
                 <td
                   colSpan={8}
