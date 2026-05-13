@@ -1,11 +1,12 @@
 import { desc, eq, isNull, sql } from "drizzle-orm";
-import { BookOpen, CalendarDays, CheckCircle2, Sparkles, TrendingUp, Wallet } from "lucide-react";
+import { BookOpen, CalendarDays, CheckCircle2, Gauge, Sparkles, TrendingUp, Wallet } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { attempts, courses, db, payments, sprintPlans } from "@/lib/db";
+import { snapshotAllQuotas, type QuotaKind } from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ export default async function ConsoleOverviewPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) redirect("/login?next=/console");
   const userId = session.user.id;
+  const quotaSnapshot = await snapshotAllQuotas(userId);
 
   // Aggregates — single transaction-free batch using sync drizzle calls.
   const [
@@ -202,6 +204,76 @@ export default async function ConsoleOverviewPage() {
               </span>
             ))}
           </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="flex items-baseline justify-between">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+            <Gauge className="h-4 w-4 text-zinc-500" />
+            本月免费配额
+          </h2>
+          {(["extract", "generate_questions", "grade", "sprint_plan"] as QuotaKind[]).every(
+            (k) => quotaSnapshot[k].isPaid,
+          ) && (
+            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-medium text-emerald-800">
+              已解锁 · 不限次
+            </span>
+          )}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(
+            [
+              { kind: "extract" as QuotaKind, label: "PDF 提取" },
+              { kind: "generate_questions" as QuotaKind, label: "AI 出题" },
+              { kind: "grade" as QuotaKind, label: "批改" },
+              { kind: "sprint_plan" as QuotaKind, label: "冲刺计划" },
+            ]
+          ).map(({ kind, label }) => {
+            const q = quotaSnapshot[kind];
+            if (q.isPaid) {
+              return (
+                <div
+                  key={kind}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-center"
+                >
+                  <div className="text-[11px] text-zinc-500">{label}</div>
+                  <div className="mt-0.5 text-sm font-semibold text-emerald-700">
+                    不限次
+                  </div>
+                </div>
+              );
+            }
+            const tint =
+              q.remaining === 0
+                ? "border-red-200 bg-red-50/50"
+                : q.remaining <= q.limit * 0.2
+                  ? "border-amber-200 bg-amber-50/50"
+                  : "border-zinc-200 bg-zinc-50/60";
+            return (
+              <div
+                key={kind}
+                className={`rounded-lg border p-3 text-center ${tint}`}
+              >
+                <div className="text-[11px] text-zinc-500">{label}</div>
+                <div className="mt-0.5 text-sm font-mono">
+                  <span className="font-semibold">{q.remaining}</span>
+                  <span className="text-zinc-400"> / {q.limit}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {!quotaSnapshot.extract.isPaid && (
+          <p className="mt-3 text-[11px] text-zinc-500">
+            免费用户每月每类操作有上限 · 解锁学科可不限次{" "}
+            <Link
+              href="/console/billing"
+              className="text-amber-700 underline-offset-2 hover:underline"
+            >
+              19.9 / 单科
+            </Link>
+          </p>
         )}
       </section>
 

@@ -4,12 +4,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db, payments } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
+import { readSetting } from "@/lib/system-settings";
 import { paymentIntentRequestSchema } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-// Fixed MVP pricing — change here when introducing tiered plans.
-const AMOUNT_CNY_PER_SUBJECT = 19.9;
+// Per-subject pricing — admin-tunable via system_settings.pricing.
+// Default falls back to 19.9 if the row is missing for any reason.
+const DEFAULT_AMOUNT_CNY = 19.9;
 
 export async function POST(req: NextRequest) {
   const ctx = await getPersistContext();
@@ -39,13 +41,16 @@ export async function POST(req: NextRequest) {
   }
   const { subject, channel, notes } = parsed.data;
 
+  const pricing = await readSetting("pricing");
+  const amountCny = Number(pricing[subject]) || DEFAULT_AMOUNT_CNY;
+
   try {
     const [order] = await db
       .insert(payments)
       .values({
         userId: ctx.user_id,
         subject,
-        amountCny: AMOUNT_CNY_PER_SUBJECT,
+        amountCny,
         channel,
         status: "pending",
         notes: notes ?? null,

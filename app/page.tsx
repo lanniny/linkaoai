@@ -1,13 +1,20 @@
-import { ArrowRight, LayoutDashboard, LogIn, Sparkles, UserPlus } from "lucide-react";
-import Link from "next/link";
-
+import {
+  ArrowRight,
+  LayoutDashboard,
+  LogIn,
+  Megaphone,
+  Sparkles,
+  UserPlus,
+} from "lucide-react";
 import { headers } from "next/headers";
+import Link from "next/link";
 
 import FeaturesGrid from "@/app/components/marketing/FeaturesGrid";
 import Footer from "@/app/components/marketing/Footer";
 import Hero from "@/app/components/marketing/Hero";
 import PricingCard from "@/app/components/marketing/PricingCard";
 import { auth } from "@/lib/auth";
+import { readSetting } from "@/lib/system-settings";
 
 export const runtime = "nodejs";
 
@@ -21,7 +28,10 @@ async function getViewerUser() {
 }
 
 export default async function HomePage() {
-  const user = await getViewerUser();
+  const [user, announcement] = await Promise.all([
+    getViewerUser(),
+    readSetting("announcement"),
+  ]);
 
   return (
     <>
@@ -81,6 +91,34 @@ export default async function HomePage() {
           </div>
         </div>
       </header>
+
+      {announcement.enabled && announcement.text && (
+        <div className="border-b border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-orange-50 px-6 py-2.5 text-center">
+          {announcement.href ? (
+            <a
+              href={announcement.href}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-900 transition hover:underline"
+              target={
+                announcement.href.startsWith("http") ? "_blank" : undefined
+              }
+              rel={
+                announcement.href.startsWith("http")
+                  ? "noopener noreferrer"
+                  : undefined
+              }
+            >
+              <Megaphone className="h-3.5 w-3.5" />
+              {announcement.text}
+              <ArrowRight className="h-3 w-3" />
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-900">
+              <Megaphone className="h-3.5 w-3.5" />
+              {announcement.text}
+            </span>
+          )}
+        </div>
+      )}
 
       <Hero />
       <div id="features">
