@@ -52,7 +52,6 @@ export function StatsCharts(props: StatsProps) {
             <YAxis stroke="#71717a" fontSize={10} tickLine={false} />
             <Tooltip
               formatter={(v: number) => `¥${v.toFixed(2)}`}
-              labelClassName="text-xs"
               contentStyle={{ fontSize: 12 }}
             />
             <Line
@@ -84,10 +83,7 @@ export function StatsCharts(props: StatsProps) {
               tickLine={false}
               allowDecimals={false}
             />
-            <Tooltip
-              labelClassName="text-xs"
-              contentStyle={{ fontSize: 12 }}
-            />
+            <Tooltip contentStyle={{ fontSize: 12 }} />
             <Bar dataKey="count" fill="#3b82f6" radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
