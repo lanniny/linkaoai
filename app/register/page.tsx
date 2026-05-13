@@ -11,13 +11,11 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+
+import { authClient } from "@/lib/auth-client";
 
 export default function RegisterPage() {
-  const supabaseConfigured =
-    typeof process.env.NEXT_PUBLIC_SUPABASE_URL === "string" &&
-    process.env.NEXT_PUBLIC_SUPABASE_URL.length > 0;
-
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordRepeat, setPasswordRepeat] = useState("");
@@ -26,12 +24,6 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!supabaseConfigured) {
-      toast.error("注册功能尚未开通", {
-        description: "Supabase 项目尚未配置",
-      });
-      return;
-    }
     if (!email.includes("@")) {
       toast.error("请输入有效邮箱");
       return;
@@ -46,26 +38,21 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await authClient.signUp.email({
         email,
         password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
+        name: name.trim() || email.split("@")[0]!,
       });
-      if (error) throw error;
+      if (error) throw new Error(error.message ?? "注册失败");
       setDone(true);
-      // If Supabase has email confirmation OFF, user gets a session right away.
-      if (data.session) {
+      if (data) {
+        // autoSignIn: true → already logged in, bounce to console
         toast.success("注册成功，已登录");
         setTimeout(() => {
           window.location.href = "/console";
         }, 1200);
       } else {
-        toast.success("注册成功", {
-          description: "请去邮箱点击确认链接激活账号",
-        });
+        toast.success("注册成功", { description: "请登录" });
       }
     } catch (err) {
       toast.error("注册失败", {
@@ -92,16 +79,23 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        {!supabaseConfigured && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-            <div className="font-semibold">⚠️ Demo 模式 · 注册暂未生效</div>
-            <p className="mt-1">主人配好 .env 后此页自动激活。</p>
-          </div>
-        )}
-
         {!done && (
           <div className="rounded-xl border bg-white p-6 shadow-sm">
             <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-600">
+                  昵称（可选）
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="留空用邮箱前缀"
+                  disabled={loading}
+                  maxLength={32}
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-900"
+                />
+              </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-600">
                   邮箱
@@ -160,7 +154,7 @@ export default function RegisterPage() {
               </div>
               <button
                 type="submit"
-                disabled={loading || !supabaseConfigured}
+                disabled={loading}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -184,12 +178,10 @@ export default function RegisterPage() {
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center text-sm">
             <Check className="mx-auto h-10 w-10 rounded-full bg-emerald-100 p-2 text-emerald-700" />
             <h2 className="mt-3 text-base font-semibold text-emerald-900">
-              注册请求已提交
+              注册完成
             </h2>
             <p className="mt-2 text-xs leading-relaxed text-emerald-800">
-              如果 Supabase 启用了邮箱确认，请去 <strong>{email}</strong>{" "}
-              点击确认链接完成激活；
-              没启用则已自动登录，3 秒后回到首页。
+              账号 <strong>{email}</strong> 已创建并自动登录。3 秒后跳到控制台。
             </p>
             <Link
               href="/console"
@@ -203,7 +195,7 @@ export default function RegisterPage() {
 
         <p className="text-center text-xs leading-relaxed text-zinc-400">
           注册即同意 AI 输出仅供参考、以教材老师讲义为准 ·{" "}
-          <Link href="/pay" className="underline">
+          <Link href="/console/billing" className="underline">
             退款条款
           </Link>
         </p>
