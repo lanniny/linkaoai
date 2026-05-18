@@ -25,6 +25,17 @@ const CHANNEL_LABEL: Record<string, string> = {
   redemption_code: "兑换码",
 };
 
+// 区分订单类型：plan=null 旧版单科一次性永久买断；plus/pro 订阅订单
+function planBadge(plan: string | null): { label: string; tone: string } {
+  if (plan === "pro") {
+    return { label: "Pro 订阅", tone: "bg-emerald-100 text-emerald-800 border-emerald-200" };
+  }
+  if (plan === "plus") {
+    return { label: "Plus 订阅", tone: "bg-amber-100 text-amber-800 border-amber-200" };
+  }
+  return { label: "单科永久", tone: "bg-zinc-100 text-zinc-700 border-zinc-200" };
+}
+
 function fmtMonth(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -156,40 +167,48 @@ export default async function BillingHistoryPage() {
             </div>
           </div>
           <ul className="divide-y divide-zinc-100">
-            {bucket.orders.map((r) => (
-              <li
-                key={r.id}
-                className="flex items-baseline justify-between gap-3 py-2 text-xs"
-              >
-                <span className="flex items-baseline gap-2">
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      STATUS_STYLES[r.status] ?? ""
-                    }`}
-                  >
-                    {r.status}
-                  </span>
-                  <span className="font-medium">{r.subject}</span>
-                  <span className="font-mono text-zinc-500">
-                    ¥{Number(r.amountCny).toFixed(2)}
-                  </span>
-                  <span className="text-zinc-400">
-                    {CHANNEL_LABEL[r.channel] ?? r.channel}
-                  </span>
-                  {r.refundReason && (
+            {bucket.orders.map((r) => {
+              const badge = planBadge(r.plan);
+              return (
+                <li
+                  key={r.id}
+                  className="flex items-baseline justify-between gap-3 py-2 text-xs"
+                >
+                  <span className="flex flex-wrap items-baseline gap-2">
                     <span
-                      className="text-[10px] text-zinc-500"
-                      title={r.refundReason}
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        STATUS_STYLES[r.status] ?? ""
+                      }`}
                     >
-                      · 退款原因 {r.refundReason.slice(0, 20)}
+                      {r.status}
                     </span>
-                  )}
-                </span>
-                <span className="shrink-0 font-mono text-[10px] text-zinc-400">
-                  {fmtDate(r.createdAt)}
-                </span>
-              </li>
-            ))}
+                    <span
+                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.tone}`}
+                    >
+                      {badge.label}
+                    </span>
+                    <span className="font-medium">{r.subject}</span>
+                    <span className="font-mono text-zinc-500">
+                      ¥{Number(r.amountCny).toFixed(2)}
+                    </span>
+                    <span className="text-zinc-400">
+                      {CHANNEL_LABEL[r.channel] ?? r.channel}
+                    </span>
+                    {r.refundReason && (
+                      <span
+                        className="text-[10px] text-zinc-500"
+                        title={r.refundReason}
+                      >
+                        · 退款原因 {r.refundReason.slice(0, 20)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-zinc-400">
+                    {fmtDate(r.createdAt)}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ))}

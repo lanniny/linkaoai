@@ -1,14 +1,104 @@
 import Link from "next/link";
-import { ArrowRight, Check, ShieldCheck } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Crown,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 
-const FEATURES = [
-  "PDF 课件解析 1 次试用（高数 / 线代 / 概率论 / 其他）",
-  "5 道 AI 练习题 + 批改反馈",
-  "1 份逐日冲刺计划",
-  "单科付费后解锁不限次使用",
-  "最后三天可生成模拟卷",
-  "学习历史 + 学科总览（登录后）",
-];;
+type PlanKey = "free" | "plus" | "pro";
+
+const PLAN_CARDS: Array<{
+  key: PlanKey;
+  name: string;
+  price: string;
+  cadence: string;
+  tagline: string;
+  features: string[];
+  cta: { label: string; href: string };
+  /** Tailwind tones — kept inline so the card styles are obvious at a glance. */
+  tone: {
+    card: string;
+    accent: string;
+    iconBg: string;
+    cta: string;
+    pill?: string;
+  };
+  featured?: boolean;
+}> = [
+  {
+    key: "free",
+    name: "Free",
+    price: "¥0",
+    cadence: "/月",
+    tagline: "先免费跑通完整流程，确认有效再升级",
+    features: [
+      "PDF 提取 1 次 / 月",
+      "AI 出题 20 次 / 月",
+      "AI 批改 60 次 / 月",
+      "冲刺计划 3 次 / 月",
+      "学习历史 + 学科总览",
+    ],
+    cta: { label: "免费开始", href: "/register" },
+    tone: {
+      card: "border-zinc-200 bg-white",
+      accent: "text-zinc-700",
+      iconBg: "bg-zinc-100 text-zinc-700",
+      cta: "bg-zinc-900 text-white hover:bg-zinc-800",
+    },
+  },
+  {
+    key: "plus",
+    name: "Plus",
+    price: "¥9.9",
+    cadence: "/月",
+    tagline: "日常练习 + 三学科全开，性价比首选",
+    features: [
+      "PDF 提取 5 次 / 月",
+      "AI 出题 100 次 / 月",
+      "AI 批改 300 次 / 月",
+      "冲刺计划 10 次 / 月",
+      "三学科全开（高数 / 线代 / 概率论）",
+    ],
+    cta: { label: "升级 Plus", href: "/console/billing" },
+    tone: {
+      card: "border-amber-300 bg-amber-50/40 ring-2 ring-amber-300",
+      accent: "text-amber-900",
+      iconBg: "bg-amber-100 text-amber-700",
+      cta: "bg-amber-600 text-white hover:bg-amber-700",
+      pill: "bg-amber-600 text-white",
+    },
+    featured: true,
+  },
+  {
+    key: "pro",
+    name: "Pro",
+    price: "¥19.9",
+    cadence: "/月",
+    tagline: "重要考试月按下不限次按钮",
+    features: [
+      "全部 AI 调用 不限次",
+      "模拟卷优先使用 Opus 模型",
+      "90 天历史记录保留",
+      "所有学科解锁",
+      "挂科退款政策（年付适用）",
+    ],
+    cta: { label: "升级 Pro", href: "/console/billing" },
+    tone: {
+      card: "border-emerald-300 bg-emerald-50/40",
+      accent: "text-emerald-900",
+      iconBg: "bg-emerald-100 text-emerald-700",
+      cta: "bg-emerald-700 text-white hover:bg-emerald-800",
+    },
+  },
+];
+
+const ICONS: Record<PlanKey, typeof Sparkles> = {
+  free: Sparkles,
+  plus: Zap,
+  pro: Crown,
+};
 
 export default function PricingCard() {
   return (
@@ -16,89 +106,75 @@ export default function PricingCard() {
       <div className="mx-auto max-w-6xl px-6 py-12 sm:py-16">
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">
-            先试用，再决定要不要解锁单科
+            按月订阅，灵活解锁
           </h2>
           <p className="mt-2 text-sm leading-7 text-zinc-600">
-            免费版能先看提纲和刷题效果，买了之后再开放不限次和模考。
+            Free 永远免费试用 · Plus 三学科全开 · Pro 不限次。月付灵活，不喜欢可以下个月不续。
           </p>
         </div>
 
-        <div className="mt-10 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700">
-              免费试用
-            </div>
-            <div className="mt-4 space-y-3 text-sm text-zinc-700">
-              <div className="flex items-start gap-2">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span>1 次课件解析，先看 AI 能不能提对重点。</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span>5 道练习题 + 批改反馈，先感受刷题链路。</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span>1 份逐日冲刺计划，先知道怎么安排时间。</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span>不含模拟卷，先把最关键的前几步跑通。</span>
-              </div>
-            </div>
-            <p className="mt-5 text-xs leading-6 text-zinc-500">
-              试用阶段就会保留 AI 免责声明，输出内容仅供复习参考。
-            </p>
-          </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-3">
+          {PLAN_CARDS.map((plan) => {
+            const Icon = ICONS[plan.key];
+            return (
+              <div
+                key={plan.key}
+                className={`relative overflow-hidden rounded-2xl border p-6 shadow-sm transition ${plan.tone.card}`}
+              >
+                {plan.featured && (
+                  <span
+                    className={`absolute right-4 top-4 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide ${plan.tone.pill}`}
+                  >
+                    推荐
+                  </span>
+                )}
 
-          <div className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
-            <div className="bg-[linear-gradient(180deg,#fff7ed_0%,#fffdf7_100%)] p-6">
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="text-4xl font-bold text-zinc-900">¥19.9</span>
-                <span className="text-sm text-zinc-600">/ 单科</span>
-                <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-amber-700 shadow-sm">
-                  先试再买
-                </span>
-              </div>
-              <p className="mt-2 flex max-w-lg items-start gap-1.5 text-sm leading-7 text-zinc-700">
-                <ShieldCheck className="mt-1 h-3.5 w-3.5 shrink-0 text-amber-700" />
-                <span>
-                  解锁后不限次解析、出题、批改、计划和模拟卷。完成 ≥80% 冲刺任务后仍挂科，可按条款申请退款。
-                </span>
-              </p>
-            </div>
-
-            <ul className="divide-y divide-zinc-200">
-              {FEATURES.map((feature) => (
-                <li key={feature} className="flex items-start gap-2 px-5 py-3 text-sm">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  <span className="text-zinc-700">{feature}</span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="border-t bg-zinc-50 p-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/pay"
-                  className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+                <span
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-lg ${plan.tone.iconBg}`}
                 >
-                  去支付
+                  <Icon className="h-4 w-4" />
+                </span>
+
+                <h3 className={`mt-4 text-lg font-bold ${plan.tone.accent}`}>
+                  {plan.name}
+                </h3>
+                <div className="mt-2 flex items-baseline gap-1">
+                  <span className="text-3xl font-bold tracking-tight text-zinc-900">
+                    {plan.price}
+                  </span>
+                  <span className="text-sm text-zinc-500">{plan.cadence}</span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-zinc-600">
+                  {plan.tagline}
+                </p>
+
+                <ul className="mt-5 space-y-2 text-sm text-zinc-700">
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <Link
+                  href={plan.cta.href}
+                  className={`mt-6 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-medium shadow-sm transition ${plan.tone.cta}`}
+                >
+                  {plan.cta.label}
                   <ArrowRight className="h-4 w-4" />
                 </Link>
-                <Link
-                  href="/console/practice"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-zinc-600 underline-offset-2 transition hover:text-zinc-900 hover:underline"
-                >
-                  先去控制台试用
-                </Link>
               </div>
-              <p className="mt-2 text-[11px] text-zinc-400">
-                付费后才解锁不限次和模拟卷。
-              </p>
-            </div>
-          </div>
+            );
+          })}
         </div>
+
+        <p className="mt-6 text-center text-xs leading-6 text-zinc-500">
+          🎁 早期支持者注意：已经买过 ¥19.9 单科永久的同学，权益不变 ·
+          等同 Pro 不限次 · 还可叠加 Plus/Pro 月订阅升级额度。
+          <br />
+          所有 AI 输出仅作复习辅助参考，请以教材 / 老师讲义为准。
+        </p>
       </div>
     </section>
   );

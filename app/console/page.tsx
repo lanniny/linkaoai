@@ -4,10 +4,12 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
+  Crown,
   Gauge,
   Sparkles,
   TrendingUp,
   Wallet,
+  Zap,
 } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
@@ -24,6 +26,10 @@ import {
   weaknessPoints,
 } from "@/lib/db";
 import { snapshotAllQuotas, type QuotaKind } from "@/lib/quota";
+import {
+  getUserPlan,
+  listActiveSubscriptions,
+} from "@/lib/subscription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,7 +62,22 @@ export default async function ConsoleOverviewPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) redirect("/login?next=/console");
   const userId = session.user.id;
-  const quotaSnapshot = await snapshotAllQuotas(userId);
+  const [quotaSnapshot, currentPlan, activeSubs] = await Promise.all([
+    snapshotAllQuotas(userId),
+    getUserPlan(userId),
+    listActiveSubscriptions(userId),
+  ]);
+  // Helper for "距过期还有 N 天" — used by the subscription header card.
+  const subByPlan = {
+    plus: activeSubs.find((s) => s.plan === "plus"),
+    pro: activeSubs.find((s) => s.plan === "pro"),
+  } as const;
+  // eslint-disable-next-line react-hooks/purity
+  const renderNowMs = Date.now();
+  function daysLeft(d: Date | null | undefined): number {
+    if (!d) return 0;
+    return Math.max(0, Math.ceil((d.getTime() - renderNowMs) / 86400_000));
+  }
 
   // Aggregates — single transaction-free batch using sync drizzle calls.
   const [
@@ -202,6 +223,113 @@ export default async function ConsoleOverviewPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
+      {/* 当前订阅 — 顶部第一张 card，让用户立刻看到 plan + 剩余天数 */}
+      {currentPlan === "legacy_lifetime" ? (
+        <section className="rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50 to-amber-50 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                <Crown className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-purple-900">
+                  🙏 早期支持者 · 永久权益
+                </p>
+                <p className="text-[11px] text-zinc-600">
+                  19.9 单科永久买断 · 等同 Pro 不限次 · 可叠加月订阅
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/console/billing"
+              className="rounded-lg border border-purple-300 bg-white px-3 py-1.5 text-xs font-medium text-purple-700 transition hover:bg-purple-50"
+            >
+              叠加订阅
+            </Link>
+          </div>
+        </section>
+      ) : currentPlan === "pro" ? (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                <Crown className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-emerald-900">
+                  Pro 订阅生效中 · 全部不限次
+                </p>
+                <p className="text-[11px] text-zinc-600">
+                  距过期还有{" "}
+                  <span className="font-mono font-medium">
+                    {daysLeft(subByPlan.pro?.currentPeriodEnd)}
+                  </span>{" "}
+                  天 · 月付灵活，下个月可不续
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/console/billing"
+              className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50"
+            >
+              续费 +30 天
+            </Link>
+          </div>
+        </section>
+      ) : currentPlan === "plus" ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                <Zap className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  Plus 订阅生效中 · 三学科全开
+                </p>
+                <p className="text-[11px] text-zinc-600">
+                  距过期还有{" "}
+                  <span className="font-mono font-medium">
+                    {daysLeft(subByPlan.plus?.currentPeriodEnd)}
+                  </span>{" "}
+                  天 · 升级 Pro 可解锁不限次
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/console/billing"
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-50"
+            >
+              续费 / 升级
+            </Link>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">
+                  当前免费档 · 配额按月重置
+                </p>
+                <p className="text-[11px] text-zinc-500">
+                  升级 Plus（¥9.9）解锁三学科 · 升级 Pro（¥19.9）解锁不限次
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/console/billing"
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+            >
+              升级订阅
+            </Link>
+          </div>
+        </section>
+      )}
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, tint }) => (
           <div
