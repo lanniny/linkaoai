@@ -132,10 +132,10 @@ export default async function HomePage() {
       <section className="border-y border-zinc-200 bg-zinc-50 px-6 py-12">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-2xl font-bold tracking-tight text-zinc-900">
-            7 天后考试，要不要先<span className="text-amber-700">试一下</span>？
+            先上传一份课件，看看它能<span className="text-amber-700">帮你到哪一步</span>？
           </h2>
           <p className="mt-2 text-sm text-zinc-600">
-            注册 30 秒，免费上传 1 份 PDF 提取大纲。觉得不亏再 19.9 元解锁单科。
+            注册 30 秒，先看考点大纲和 5 道题的效果。顺手再决定要不要解锁单科。
           </p>
           <div className="mt-5 inline-flex items-center gap-3">
             <Link

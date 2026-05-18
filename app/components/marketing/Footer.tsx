@@ -9,9 +9,9 @@ export default function Footer() {
           <div className="col-span-2">
             <h3 className="font-semibold text-zinc-900">临考 Linkao</h3>
             <p className="mt-1 max-w-xs text-xs text-zinc-500">
-              大学生期末冲刺工具 · 30 天 MVP 公开挑战
+              大学生期末冲刺工具 · 高数 / 线代 / 概率论
               <br />
-              2026-05-10 → 2026-06-09
+              AI 先提考点，再出题、批改和排计划
             </p>
           </div>
           <div>
@@ -74,8 +74,7 @@ export default function Footer() {
           </div>
         </div>
         <div className="mt-8 border-t pt-4 text-center text-xs text-zinc-400">
-          © 2026 临考 · linkaoai.com · AI 生成内容仅供参考，请以教材 /
-          老师讲义为准
+          © 2026 临考 · linkaoai.com · AI 生成内容仅供参考，请以教材 / 老师讲义为准
         </div>
       </div>
     </footer>
