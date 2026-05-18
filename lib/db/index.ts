@@ -19,7 +19,9 @@ function resolveDbPath(): string {
   const url = process.env.DATABASE_URL ?? "file:./data/linkao.db";
   if (url.startsWith("file:")) {
     const rel = url.slice("file:".length);
-    return path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
+    return path.isAbsolute(rel)
+      ? rel
+      : path.join(/* turbopackIgnore: true */ process.cwd(), rel);
   }
   if (url === ":memory:") return url;
   return url;

@@ -42,7 +42,7 @@ yarn-error.log*
 next-env.d.ts
 
 # vibe governed runtime — per-session artifacts (too churny for git)
-/outputs/runtime/
+/outputs/
 /.vibeskills/
 
 # Claude Code local workspace (plans, intelligence, agent state)
@@ -57,3 +57,12 @@ Thumbs.db
 .idea/
 .vscode/
 
+.ace-tool/
+
+# MCP / governance tools — local data, never commit
+.pnpm-store/
+.serena/
+.spec-workflow/
+
+# Runtime SQLite DB (dev/local only; prod DB lives on the server)
+/data/
