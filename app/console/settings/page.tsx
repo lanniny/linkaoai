@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Calendar, LogOut, Mail, ShieldCheck, User2 } from "lucide-react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
-import { db, payments } from "@/lib/db";
+import { db, payments, personalAccessTokens } from "@/lib/db";
+import { PatManager } from "./PatManager";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,11 +25,40 @@ export default async function ConsoleSettingsPage() {
   if (!session?.user) redirect("/login?next=/console/settings");
   const user = session.user;
 
-  const paidRows = await db
-    .select({ subject: payments.subject })
-    .from(payments)
-    .where(and(eq(payments.userId, user.id), eq(payments.status, "paid")));
+  const [paidRows, tokenRows] = await Promise.all([
+    db
+      .select({ subject: payments.subject })
+      .from(payments)
+      .where(and(eq(payments.userId, user.id), eq(payments.status, "paid"))),
+    db
+      .select({
+        id: personalAccessTokens.id,
+        name: personalAccessTokens.name,
+        prefix: personalAccessTokens.prefix,
+        scopes: personalAccessTokens.scopes,
+        createdAt: personalAccessTokens.createdAt,
+        lastUsedAt: personalAccessTokens.lastUsedAt,
+        revokedAt: personalAccessTokens.revokedAt,
+        expiresAt: personalAccessTokens.expiresAt,
+      })
+      .from(personalAccessTokens)
+      .where(eq(personalAccessTokens.userId, user.id))
+      .orderBy(desc(personalAccessTokens.createdAt))
+      .limit(50),
+  ]);
   const unlocked = Array.from(new Set(paidRows.map((p) => p.subject)));
+  // Serialize timestamps to numbers for client component prop boundary
+  // (Date instances don't survive RSC → client serialization untouched).
+  const tokens = tokenRows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    prefix: t.prefix,
+    scopes: (t.scopes ?? []) as ("read" | "write")[],
+    createdAt: t.createdAt ? new Date(t.createdAt).getTime() : 0,
+    lastUsedAt: t.lastUsedAt ? new Date(t.lastUsedAt).getTime() : null,
+    revokedAt: t.revokedAt ? new Date(t.revokedAt).getTime() : null,
+    expiresAt: t.expiresAt ? new Date(t.expiresAt).getTime() : null,
+  }));
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-6">
@@ -103,6 +133,8 @@ export default async function ConsoleSettingsPage() {
         )}
       </section>
 
+      <PatManager initial={tokens} />
+
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold">🔧 账户操作</h2>
         <ul className="mt-3 space-y-2 text-sm">
@@ -110,12 +142,6 @@ export default async function ConsoleSettingsPage() {
             <p className="font-medium">修改密码</p>
             <p className="mt-0.5 text-xs text-zinc-500">
               暂未提供 UI · 后续接入 better-auth changePassword
-            </p>
-          </li>
-          <li className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-3">
-            <p className="font-medium">个人访问令牌 (PAT)</p>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              new-api M1 镜像 · 下个 Wave 上线
             </p>
           </li>
           <li className="rounded-lg border border-red-100 bg-red-50/60 p-3">
