@@ -44,10 +44,17 @@ agents (and the founder) don't re-invent decisions made during the
 - **Linkao**: `ai_channels` table seeded with Opus + Haiku rows pointing at
   the founder-approved openclaudecode.cn proxy. Admin UI at
   `/console/admin/channels` supports inline edit + ping + delete + add.
-- **Note**: Linkao does NOT yet read this table at request-time —
-  `lib/anthropic.ts` still hardcodes the proxy URL. Channel table is
-  currently informational + ready-for-routing; runtime read will follow
-  when we actually start failing over across providers.
+- **Runtime read** (landed 2026-05-19): `lib/anthropic.ts` now exposes
+  `resolveChannel(role: "primary" | "bulk")` which picks the
+  smallest-`priority` enabled row whose model name matches the role's family
+  (opus / haiku) — same ordering as new-api and as the
+  `/console/admin/channels` table. Returns `{ channelId, baseUrl, model, client }`.
+  4 AI routes call it per-request; success path bumps `last_ok_at` via
+  `markChannelOk()`, error path writes `last_error` via `markChannelError()`
+  (both fire-and-forget). Env vars `ANTHROPIC_BASE_URL` /
+  `ANTHROPIC_MODEL_*` are kept as fallback when the table is empty (dev /
+  CI). `ALLOWED_HOST_SUFFIXES` whitelist still guards every URL — defends
+  against bad admin input.
 
 ### M4 · AI Usage Logs
 
@@ -140,18 +147,26 @@ enable this if we ever wanted it, but it's not the core business.
 
 ## ⏳ Wired but not yet visible
 
-### Quota status in user UI
-Server-side quota gate is live but `/console` overview doesn't yet
-surface "你本月还能用 X 次". Helper `snapshotAllQuotas()` is ready —
-just needs a card.
+_(empty as of 2026-05-19 — all three previously-deferred items have shipped)_
 
-### Announcement banner
-`system_settings.announcement` is editable but the marketing homepage
-doesn't read it yet.
+**Shipped 2026-05-13** (commit 55c771b):
+- **Quota status in user UI** — `/console` overview shows per-route remaining,
+  `/console/practice` shows the same in an in-page banner.
+- **Announcement banner** — `app/page.tsx` reads `system_settings.announcement`
+  and renders the homepage strip when `enabled && text` is set.
+- **Dynamic pricing** — `/api/payment/intent` reads `system_settings.pricing`
+  per subject (default 19.9 if missing).
 
-### AI channels runtime read
-`ai_channels` is editable but `lib/anthropic.ts` doesn't read it; the
-Anthropic SDK still picks up `ANTHROPIC_BASE_URL` from env.
+**Shipped 2026-05-19**:
+- **AI channels runtime read** — `lib/anthropic.ts` `resolveChannel(role)`
+  picks rows from `ai_channels` at request-time; 4 AI routes write health
+  state back via `markChannelOk` / `markChannelError`. See M3 section above.
+- **Weakness-points double-loop** — `/api/grade` now marks `resolved_at` on
+  correct answers (not just bumps `miss_count` on errors), honoring the
+  "答对一次此考点会从这里下架" UX promise in `/console`.
+- **Practice page quota banner + 429 friendly degradation** — `/console/practice`
+  shows live remaining + a toast with a "解锁单科" CTA when 429s land,
+  preserving the user's current subject in the billing URL.
 
 ---
 
@@ -176,7 +191,16 @@ Anthropic SDK still picks up `ANTHROPIC_BASE_URL` from env.
 
 ## Sign-off
 
-All 9 mapping bullets in the frozen `requirement_doc` are accounted for.
-Items left as "follow-up" (M1 UI, channel runtime read, announcement
-banner, quota-status card) are intentional, documented here, and not
-considered scope drift.
+All 9 mapping bullets in the frozen `requirement_doc` are accounted for
+and all previously-deferred follow-ups have landed as of 2026-05-19.
+The only outstanding item is **M1 Personal Access Tokens UI**, which is
+intentionally deferred — exam-review product has no end-user "use my token
+from my CLI" story yet. Schema sits ready in `personal_access_tokens` for
+when that story emerges.
+
+### Decision log (post-sign-off)
+
+- **2026-05-19** — AI channels runtime read landed. `lib/anthropic.ts`
+  now resolves baseUrl + model from `ai_channels` per-request (with env
+  fallback + whitelist guard). Admin can swap providers / models from the
+  `/console/admin/channels` UI without a redeploy.

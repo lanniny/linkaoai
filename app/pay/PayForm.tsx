@@ -31,12 +31,23 @@ export default function PayForm({ signedIn }: { signedIn: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
 
-  // Pick up ?return=success|failed|... from EPay return_url for inline banner
+  // Pick up ?return=...&order=... from EPay return_url for inline banner, and
+  // ?subject=... from practice-page quota-exceeded toast so we land with the
+  // student's current subject pre-selected. Server-side default is "高数" — we
+  // patch here after hydration to avoid a server/client markup mismatch.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const p = new URLSearchParams(window.location.search);
+
+    // pre-select subject when caller passed one
+    const s = p.get("subject");
+    if (s === "高数" || s === "线代" || s === "概率论" || s === "其他") {
+      // setState after hydration is intentional here — see comment above.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSubject(s);
+    }
+
     const ret = p.get("return");
-    if (!ret) return;
     if (ret === "success") {
       toast.success("支付成功！账户已开通", {
         description: `订单 ${p.get("order") ?? ""} 已标记 paid`,
@@ -52,11 +63,14 @@ export default function PayForm({ signedIn }: { signedIn: boolean }) {
         description: "请改用手动渠道或兑换码",
       });
     }
-    // strip the query to keep URL clean
-    const url = new URL(window.location.href);
-    url.searchParams.delete("return");
-    url.searchParams.delete("order");
-    window.history.replaceState({}, "", url.toString());
+    // strip transient query params to keep URL clean (keep ?subject if set so
+    // refresh / back still works, but drop the EPay return params)
+    if (ret) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("return");
+      url.searchParams.delete("order");
+      window.history.replaceState({}, "", url.toString());
+    }
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {

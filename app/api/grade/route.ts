@@ -1,9 +1,16 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
-import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
+import {
+  assertOfficialEndpoint,
+  markChannelError,
+  markChannelOk,
+  resolveChannel,
+  type ResolvedChannel,
+} from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
-import { attempts } from "@/lib/db";
+import { attempts, questions, weaknessPoints } from "@/lib/db";
 import { assertNotMaintenance } from "@/lib/maintenance";
 import { getPersistContext } from "@/lib/persistence";
 import { checkQuota } from "@/lib/quota";
@@ -61,6 +68,9 @@ LaTeX 约定：所有 ai_feedback / next_step_hint 中的数学公式用 \`$...$
 export async function POST(req: NextRequest) {
   let userIdForLog: string | null = null;
   let aiStartedAt = 0;
+  // Declared outside try so the catch block can attribute the error to
+  // whatever channel resolved at the time of failure.
+  let channel: ResolvedChannel | null = null;
   try {
     const maintGuard = await assertNotMaintenance();
     if (maintGuard) return maintGuard;
@@ -131,8 +141,9 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
       );
     }
 
-    const response = await anthropic.messages.create({
-      model: MODELS.bulk,
+    channel = await resolveChannel("bulk");
+    const response = await channel.client.messages.create({
+      model: channel.model,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: [
         {
@@ -148,9 +159,11 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
         },
       ],
     });
+    void markChannelOk(channel.channelId);
 
     void emitAiUsage({
       userId: userIdForLog,
+      channelId: channel.channelId,
       route: "grade",
       model: response.model,
       status: "success",
@@ -224,6 +237,62 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
         if (row) {
           persisted = { attempt_id: row.id };
         }
+
+        // Weakness tracking: resolve the kp at grade-time rather than asking
+        // the client to send it — the client only knows the in-memory
+        // question.id, not the DB row. Two branches:
+        //   incorrect → upsert + bump miss_count (relapses clear resolved_at)
+        //   correct   → mark an existing weakness row as resolved (idempotent
+        //               update on the unique key; no-op if no row exists)
+        try {
+          const [qRow] = await ctx.db
+            .select({ kpId: questions.knowledgePointId })
+            .from(questions)
+            .where(eq(questions.id, parsed.data.question_db_id))
+            .limit(1);
+          if (qRow?.kpId) {
+            const now = new Date();
+            if (!validated.data.is_correct) {
+              await ctx.db
+                .insert(weaknessPoints)
+                .values({
+                  userId: ctx.user_id,
+                  knowledgePointId: qRow.kpId,
+                  missCount: 1,
+                  lastMissedAt: now,
+                })
+                .onConflictDoUpdate({
+                  target: [
+                    weaknessPoints.userId,
+                    weaknessPoints.knowledgePointId,
+                  ],
+                  set: {
+                    missCount: sql`${weaknessPoints.missCount} + 1`,
+                    lastMissedAt: now,
+                    // Re-flag as unresolved if a previously resolved weak
+                    // point gets missed again — relapse counts.
+                    resolvedAt: null,
+                  },
+                });
+            } else {
+              // Honor the UX promise in /console: "答对一次此考点会从这里下架".
+              // Only flips currently-unresolved rows — we don't re-stamp
+              // resolved_at on points that were already resolved earlier.
+              await ctx.db
+                .update(weaknessPoints)
+                .set({ resolvedAt: now })
+                .where(
+                  and(
+                    eq(weaknessPoints.userId, ctx.user_id),
+                    eq(weaknessPoints.knowledgePointId, qRow.kpId),
+                    isNull(weaknessPoints.resolvedAt),
+                  ),
+                );
+            }
+          }
+        } catch (err) {
+          console.warn("[/api/grade] weakness upsert failed:", err);
+        }
       } catch (err) {
         console.warn("[/api/grade] persistence threw:", err);
       }
@@ -245,12 +314,14 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
     if (aiStartedAt > 0) {
       void emitAiUsage({
         userId: userIdForLog,
+        channelId: channel?.channelId ?? null,
         route: "grade",
-        model: MODELS.bulk,
+        model: channel?.model ?? "unknown",
         status: "error",
         latencyMs: Date.now() - aiStartedAt,
         errorMessage: message,
       });
+      void markChannelError(channel?.channelId ?? null, message);
     }
     return NextResponse.json(
       { error: "批改失败", message },

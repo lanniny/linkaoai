@@ -165,7 +165,11 @@ export default async function ConsoleCourseDetailPage({ params }: PageProps) {
         )}
         <ul className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
           {kps.map((kp) => (
-            <li key={kp.id} className="rounded-lg border border-zinc-200 bg-white p-2.5">
+            <li
+              key={kp.id}
+              id={`kp-${kp.kpKey}`}
+              className="scroll-mt-4 rounded-lg border border-zinc-200 bg-white p-2.5 target:border-amber-400 target:bg-amber-50 target:shadow-[0_0_0_3px_rgba(251,191,36,0.25)]"
+            >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-medium">{kp.title}</span>
                 <span

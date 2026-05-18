@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
-import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
+import {
+  assertOfficialEndpoint,
+  markChannelError,
+  markChannelOk,
+  resolveChannel,
+  type ResolvedChannel,
+} from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { courses, knowledgePoints } from "@/lib/db";
 import { assertNotMaintenance } from "@/lib/maintenance";
@@ -61,6 +67,8 @@ const SYSTEM_PROMPT = `你是临考（Linkao）的考点提取助手，专门帮
 export async function POST(req: NextRequest) {
   let userIdForLog: string | null = null;
   let aiStartedAt = 0;
+  // Resolved at request-time; declared outside try so catch can attribute.
+  let channel: ResolvedChannel | null = null;
   try {
     // M8 maintenance gate (admin routes do not check this).
     const maintGuard = await assertNotMaintenance();
@@ -126,8 +134,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const response = await anthropic.messages.create({
-      model: MODELS.primary,
+    channel = await resolveChannel("primary");
+    const response = await channel.client.messages.create({
+      model: channel.model,
       // 8192 留足空间：22 条 topics × ~150 tokens 中文 ≈ 3.3K，加 notes/标题约 4K，留 2× 余量
       max_tokens: 8192,
       // Prompt caching: SYSTEM_PROMPT is constant across requests, so we cache it.
@@ -163,9 +172,12 @@ export async function POST(req: NextRequest) {
       ],
     });
 
+    void markChannelOk(channel.channelId);
+
     // M4 mirror — fire-and-forget telemetry; never blocks the response.
     void emitAiUsage({
       userId: userIdForLog,
+      channelId: channel.channelId,
       route: "extract",
       model: response.model,
       status: "success",
@@ -296,12 +308,14 @@ export async function POST(req: NextRequest) {
     if (aiStartedAt > 0) {
       void emitAiUsage({
         userId: userIdForLog,
+        channelId: channel?.channelId ?? null,
         route: "extract",
-        model: MODELS.primary,
+        model: channel?.model ?? "unknown",
         status: "error",
         latencyMs: Date.now() - aiStartedAt,
         errorMessage: message,
       });
+      void markChannelError(channel?.channelId ?? null, message);
     }
     return NextResponse.json(
       { error: "提取失败", message },

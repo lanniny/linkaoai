@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isAdmin } from "@/lib/admin";
+import { assertOfficialEndpoint } from "@/lib/anthropic";
 import { auth } from "@/lib/auth";
 import { aiChannels, db } from "@/lib/db";
 
@@ -43,6 +44,22 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       { error: "bad_request", message: (err as Error).message },
+      { status: 400 },
+    );
+  }
+
+  // Defense in depth — block bad base_url at write time, not just at AI-call
+  // time. Without this guard, an admin typo would silently land in the table
+  // and only surface as a "host not whitelisted" error inside resolveChannel
+  // when a user triggers an AI route.
+  try {
+    assertOfficialEndpoint(body.base_url);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: "base_url_not_allowed",
+        message: err instanceof Error ? err.message : String(err),
+      },
       { status: 400 },
     );
   }

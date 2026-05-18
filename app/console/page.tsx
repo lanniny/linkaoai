@@ -1,11 +1,28 @@
-import { desc, eq, isNull, sql } from "drizzle-orm";
-import { BookOpen, CalendarDays, CheckCircle2, Gauge, Sparkles, TrendingUp, Wallet } from "lucide-react";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import {
+  AlertCircle,
+  BookOpen,
+  CalendarDays,
+  CheckCircle2,
+  Gauge,
+  Sparkles,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
-import { attempts, courses, db, payments, sprintPlans } from "@/lib/db";
+import {
+  attempts,
+  courses,
+  db,
+  knowledgePoints,
+  payments,
+  sprintPlans,
+  weaknessPoints,
+} from "@/lib/db";
 import { snapshotAllQuotas, type QuotaKind } from "@/lib/quota";
 
 export const runtime = "nodejs";
@@ -49,6 +66,7 @@ export default async function ConsoleOverviewPage() {
     totalAttemptsRow,
     recentPlans,
     recentPayments,
+    topWeakPoints,
   ] = await Promise.all([
     db
       .select({
@@ -102,6 +120,36 @@ export default async function ConsoleOverviewPage() {
       .where(eq(payments.userId, userId))
       .orderBy(desc(payments.createdAt))
       .limit(10),
+    // Top 5 unresolved weakness points (highest miss_count first) joined
+    // with the kp + course title for display. resolved_at IS NULL filters
+    // out points that the user has since redeemed via correct answers.
+    db
+      .select({
+        id: weaknessPoints.id,
+        kpId: knowledgePoints.id,
+        kpKey: knowledgePoints.kpKey,
+        title: knowledgePoints.title,
+        level: knowledgePoints.level,
+        courseId: knowledgePoints.courseId,
+        courseSubject: courses.subject,
+        courseTitle: courses.sourceTitle,
+        missCount: weaknessPoints.missCount,
+        lastMissedAt: weaknessPoints.lastMissedAt,
+      })
+      .from(weaknessPoints)
+      .innerJoin(
+        knowledgePoints,
+        eq(weaknessPoints.knowledgePointId, knowledgePoints.id),
+      )
+      .innerJoin(courses, eq(knowledgePoints.courseId, courses.id))
+      .where(
+        and(
+          eq(weaknessPoints.userId, userId),
+          isNull(weaknessPoints.resolvedAt),
+        ),
+      )
+      .orderBy(desc(weaknessPoints.missCount), desc(weaknessPoints.lastMissedAt))
+      .limit(5),
   ]);
 
   // weed out soft-deleted courses on the in-memory list
@@ -151,9 +199,6 @@ export default async function ConsoleOverviewPage() {
       tint: "bg-amber-50 text-amber-700",
     },
   ];
-
-  // unused-import guard for isNull (kept for future soft-delete filter parity)
-  void isNull;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -276,6 +321,61 @@ export default async function ConsoleOverviewPage() {
           </p>
         )}
       </section>
+
+      {topWeakPoints.length > 0 && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
+          <div className="flex items-baseline justify-between">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertCircle className="h-4 w-4" />
+              近期薄弱点 · 错最多的考点
+            </h2>
+            <Link
+              href="/console/practice"
+              className="text-xs text-amber-700 underline-offset-2 hover:underline"
+            >
+              去重练 →
+            </Link>
+          </div>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            按 AI 批改判错次数排名 · 答对一次此考点会从这里下架
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {topWeakPoints.map((w) => (
+              <li
+                key={w.id}
+                className="flex items-baseline justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs"
+              >
+                <span className="flex items-baseline gap-2 truncate">
+                  <span
+                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${
+                      SUBJECT_STYLES[w.courseSubject] ?? ""
+                    }`}
+                  >
+                    {w.courseSubject}
+                  </span>
+                  <Link
+                    href={`/console/history/${w.courseId}#kp-${w.kpKey}`}
+                    className="truncate font-medium text-zinc-800 underline-offset-2 hover:underline"
+                  >
+                    {w.title}
+                  </Link>
+                  <span className="hidden truncate text-zinc-400 sm:inline">
+                    · {w.courseTitle}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-baseline gap-2">
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                    错 {w.missCount} 次
+                  </span>
+                  <span className="hidden font-mono text-[10px] text-zinc-400 sm:inline">
+                    {fmtDate(w.lastMissedAt)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">

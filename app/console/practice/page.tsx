@@ -1,7 +1,7 @@
 "use client";
 
 import katex from "katex";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type {
@@ -15,6 +15,28 @@ import type {
   SprintPlan,
   Subject,
 } from "@/lib/types";
+
+// Mirrors lib/quota.ts QuotaStatus but with -1 sentinels (server replaces
+// Infinity for JSON safety). Client treats -1 the same as isPaid.
+type QuotaKind = "extract" | "generate_questions" | "grade" | "sprint_plan";
+type QuotaCell = {
+  limit: number;
+  used: number;
+  remaining: number;
+  allowed: boolean;
+  isPaid: boolean;
+};
+type QuotaSnapshot = {
+  signedIn: boolean;
+  quota: Record<QuotaKind, QuotaCell> | null;
+};
+
+const QUOTA_LABEL: Record<QuotaKind, string> = {
+  extract: "PDF 提取",
+  generate_questions: "AI 出题",
+  grade: "AI 批改",
+  sprint_plan: "冲刺计划",
+};
 
 const SUBJECTS: Subject[] = ["高数", "线代", "概率论"];
 
@@ -184,6 +206,52 @@ export default function PracticePage() {
   const [sprintLoading, setSprintLoading] = useState(false);
   const [sprintError, setSprintError] = useState<string | null>(null);
 
+  // Quota snapshot — fetched on mount and after every successful AI call
+  // so the user sees the counter tick down in real time. -1 means
+  // "unlimited" (paid or anonymous).
+  const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
+  const refreshQuota = useCallback(async () => {
+    try {
+      const res = await fetch("/api/me/quota", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as QuotaSnapshot;
+      setQuota(data);
+    } catch {
+      // Quota banner is best-effort; silently skip if API hiccups.
+    }
+  }, []);
+  useEffect(() => {
+    // refreshQuota is async and only setState on resolution — the lint
+    // rule can't see across the await boundary, so suppress here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshQuota();
+  }, [refreshQuota]);
+
+  // Centralized 429 detection — used by all 4 AI handlers. Returns true
+  // when the response was a quota-exceeded error and the toast has been
+  // shown; the caller should bail out of its happy path.
+  function handleQuotaError(
+    status: number,
+    data: { error?: string; message?: string },
+    fallbackTitle: string,
+  ): boolean {
+    if (status !== 429 || data.error !== "quota_exceeded") return false;
+    const desc = data.message || "本月免费额度已用完，升级单科即可不限次。";
+    const billingHref = `/console/billing?subject=${encodeURIComponent(subject)}`;
+    toast.error(fallbackTitle, {
+      description: desc,
+      action: {
+        label: "解锁单科",
+        onClick: () => {
+          window.location.href = billingHref;
+        },
+      },
+      duration: 8000,
+    });
+    void refreshQuota();
+    return true;
+  }
+
   // Handlers
   async function handleExtract(e: React.FormEvent) {
     e.preventDefault();
@@ -205,8 +273,13 @@ export default function PracticePage() {
       fd.append("subject", subject);
       const res = await fetch("/api/extract", { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok)
+      if (!res.ok) {
+        if (handleQuotaError(res.status, data, "PDF 提取额度用完了")) {
+          setUploadError(data.message || "本月免费额度已用完");
+          return;
+        }
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
       const ol = data.outline as Outline;
       setOutline(ol);
       setExtractMeta({ model: data.meta?.model ?? "" });
@@ -225,6 +298,7 @@ export default function PracticePage() {
             .map((t) => t.id),
         ),
       );
+      void refreshQuota();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setUploadError(msg);
@@ -267,14 +341,20 @@ export default function PracticePage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok)
+      if (!res.ok) {
+        if (handleQuotaError(res.status, data, "AI 出题额度用完了")) {
+          setGenerateError(data.message || "本月免费额度已用完");
+          return;
+        }
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
       setQuestions(data.questions as GeneratedQuestion[]);
       if (data.persisted?.question_id_map) {
         setPersistedQuestionIdMap(data.persisted.question_id_map);
       } else {
         setPersistedQuestionIdMap({});
       }
+      void refreshQuota();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setGenerateError(msg);
@@ -306,9 +386,15 @@ export default function PracticePage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok)
+      if (!res.ok) {
+        if (handleQuotaError(res.status, data, "冲刺计划额度用完了")) {
+          setSprintError(data.message || "本月免费额度已用完");
+          return;
+        }
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
       setSprintPlan(data.plan as SprintPlan);
+      void refreshQuota();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setSprintError(msg);
@@ -334,9 +420,15 @@ export default function PracticePage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok)
+      if (!res.ok) {
+        if (handleQuotaError(res.status, data, "AI 批改额度用完了")) {
+          setGradeError(data.message || "本月免费额度已用完");
+          return;
+        }
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
       setGrades((prev) => ({ ...prev, [q.id]: data.grade as GradeResult }));
+      void refreshQuota();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setGradeError(msg);
@@ -374,6 +466,7 @@ export default function PracticePage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
+      <QuotaBanner snapshot={quota} />
       {/* Step 1 */}
       <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-2">
@@ -803,6 +896,89 @@ function StepBadge({
     >
       {done ? "✓" : n}
     </span>
+  );
+}
+
+function QuotaBanner({ snapshot }: { snapshot: QuotaSnapshot | null }) {
+  // Loading / anonymous: keep the page calm and don't reserve vertical space.
+  if (!snapshot) return null;
+  if (!snapshot.signedIn || !snapshot.quota) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+        <span>未登录 · 仅试用，AI 结果不会保存到你的账户</span>
+        <a
+          href="/login"
+          className="rounded border border-zinc-300 bg-white px-2 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100"
+        >
+          登录
+        </a>
+      </div>
+    );
+  }
+  const kinds: QuotaKind[] = [
+    "extract",
+    "generate_questions",
+    "grade",
+    "sprint_plan",
+  ];
+  // -1 sentinel from the server means "paid / unlimited"; any cell on it
+  // implies the whole user is paid (paid bypass is per-user, not per-route).
+  const anyCell = snapshot.quota[kinds[0]];
+  const isPaid = anyCell?.isPaid || anyCell?.limit === -1;
+  if (isPaid) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+        <span className="font-medium">✓ 已解锁 · 本月 AI 调用不限次</span>
+        <a
+          href="/console/billing/history"
+          className="rounded border border-emerald-300 bg-white px-2 py-1 font-medium text-emerald-700 transition hover:bg-emerald-100"
+        >
+          订单记录
+        </a>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium text-amber-900">
+          📊 本月免费额度（按月重置）
+        </span>
+        <a
+          href="/console/billing"
+          className="rounded border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 transition hover:bg-amber-100"
+        >
+          解锁单科
+        </a>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {kinds.map((k) => {
+          const c = snapshot.quota![k];
+          const pct = c.limit > 0 ? c.remaining / c.limit : 0;
+          const tone =
+            c.remaining === 0
+              ? "border-red-300 bg-red-50 text-red-800"
+              : pct <= 0.2
+                ? "border-amber-300 bg-white text-amber-900"
+                : "border-zinc-200 bg-white text-zinc-700";
+          return (
+            <div
+              key={k}
+              className={`rounded border px-2 py-1.5 ${tone}`}
+              title={`已用 ${c.used} / ${c.limit}`}
+            >
+              <div className="text-[10px] text-zinc-500">{QUOTA_LABEL[k]}</div>
+              <div className="text-sm font-semibold tabular-nums">
+                {c.remaining}
+                <span className="ml-1 text-[10px] font-normal text-zinc-400">
+                  / {c.limit}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

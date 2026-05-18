@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { anthropic, MODELS, assertOfficialEndpoint } from "@/lib/anthropic";
+import {
+  assertOfficialEndpoint,
+  markChannelError,
+  markChannelOk,
+  resolveChannel,
+  type ResolvedChannel,
+} from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
 import { sprintPlans } from "@/lib/db";
@@ -89,6 +95,7 @@ function todayISO(): string {
 export async function POST(req: NextRequest) {
   let userIdForLog: string | null = null;
   let aiStartedAt = 0;
+  let channel: ResolvedChannel | null = null;
   try {
     const maintGuard = await assertNotMaintenance();
     if (maintGuard) return maintGuard;
@@ -172,8 +179,9 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       );
     }
 
-    const response = await anthropic.messages.create({
-      model: MODELS.bulk,
+    channel = await resolveChannel("bulk");
+    const response = await channel.client.messages.create({
+      model: channel.model,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: [
         {
@@ -184,9 +192,11 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       ],
       messages: [{ role: "user", content: userText }],
     });
+    void markChannelOk(channel.channelId);
 
     void emitAiUsage({
       userId: userIdForLog,
+      channelId: channel.channelId,
       route: "sprint_plan",
       model: response.model,
       status: "success",
@@ -291,12 +301,14 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
     if (aiStartedAt > 0) {
       void emitAiUsage({
         userId: userIdForLog,
+        channelId: channel?.channelId ?? null,
         route: "sprint_plan",
-        model: MODELS.bulk,
+        model: channel?.model ?? "unknown",
         status: "error",
         latencyMs: Date.now() - aiStartedAt,
         errorMessage: message,
       });
+      void markChannelError(channel?.channelId ?? null, message);
     }
     return NextResponse.json(
       { error: "生成失败", message },
