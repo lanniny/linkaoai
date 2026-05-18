@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db, payments } from "@/lib/db";
 import { getEpayConfig, verifyEpayCallback } from "@/lib/epay";
+import { issueSubscriptionFromPayment } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // never cache callbacks
@@ -58,7 +59,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   try {
     // Idempotent: only flip pending -> paid; replaying after a paid state
     // is a no-op but still returns success so EPay stops retrying.
-    await db
+    const updated = await db
       .update(payments)
       .set({
         status: "paid",
@@ -66,7 +67,22 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         epayTradeNo: params.trade_no ?? null,
         epayOutTradeNo: orderId,
       })
-      .where(and(eq(payments.id, orderId), eq(payments.status, "pending")));
+      .where(and(eq(payments.id, orderId), eq(payments.status, "pending")))
+      .returning({
+        id: payments.id,
+        userId: payments.userId,
+        plan: payments.plan,
+      });
+
+    // 订阅类付款 → 创建/延期 subscriptions 行（fire-and-forget，失败不阻塞 EPay）
+    const row = updated[0];
+    if (row && (row.plan === "plus" || row.plan === "pro")) {
+      void issueSubscriptionFromPayment({
+        paymentId: row.id,
+        userId: row.userId,
+        plan: row.plan,
+      });
+    }
   } catch (err) {
     console.error("[epay/notify] update failed:", err);
     return new NextResponse("db_error", { status: 500 });

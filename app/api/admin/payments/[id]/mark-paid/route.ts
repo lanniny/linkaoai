@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/admin";
 import { auth } from "@/lib/auth";
 import { db, payments } from "@/lib/db";
+import { issueSubscriptionFromPayment } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 
@@ -25,7 +26,12 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
 
   const [existing] = await db
-    .select({ id: payments.id, status: payments.status })
+    .select({
+      id: payments.id,
+      status: payments.status,
+      userId: payments.userId,
+      plan: payments.plan,
+    })
     .from(payments)
     .where(eq(payments.id, id))
     .limit(1);
@@ -54,6 +60,15 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         notesAdmin: `marked by ${caller!.email ?? caller!.id}`,
       })
       .where(eq(payments.id, id));
+
+    // 订阅类付款 → 同时创建/延期 subscriptions 行
+    if (existing.plan === "plus" || existing.plan === "pro") {
+      void issueSubscriptionFromPayment({
+        paymentId: id,
+        userId: existing.userId,
+        plan: existing.plan,
+      });
+    }
   } catch (err) {
     return NextResponse.json(
       {

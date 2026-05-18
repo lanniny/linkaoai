@@ -183,12 +183,33 @@ export type RedemptionRedeemRequest = z.infer<
   typeof redemptionRedeemRequestSchema
 >;
 
-export const paymentIntentRequestSchema = z.object({
-  subject: subjectSchema,
-  channel: paymentChannelSchema,
-  // optional buyer note attached to the order (e.g., extra contact info)
-  notes: z.string().max(200).optional(),
-});
+/**
+ * Payment intent 接受三种购买类型：
+ *   - 'single_subject' (默认 · 向后兼容)：旧版 19.9 单科一次性永久买断
+ *   - 'plus_monthly'：Plus 月订阅 ¥9.9 / 30 天
+ *   - 'pro_monthly'：Pro 月订阅 ¥19.9 / 30 天
+ *
+ * 旧 client 不传 purchase_type 时默认 single_subject + 需要 subject 字段；
+ * 订阅 client 传 plus_monthly / pro_monthly 时 subject 可省。
+ */
+export const purchaseTypeSchema = z.enum([
+  "single_subject",
+  "plus_monthly",
+  "pro_monthly",
+]);
+export type PurchaseType = z.infer<typeof purchaseTypeSchema>;
+
+export const paymentIntentRequestSchema = z
+  .object({
+    purchase_type: purchaseTypeSchema.default("single_subject"),
+    subject: subjectSchema.optional(),
+    channel: paymentChannelSchema,
+    notes: z.string().max(200).optional(),
+  })
+  .refine(
+    (d) => d.purchase_type !== "single_subject" || d.subject !== undefined,
+    { message: "single_subject 必须传 subject", path: ["subject"] },
+  );
 export type PaymentIntentRequest = z.infer<typeof paymentIntentRequestSchema>;
 
 export const sprintPlanRequestSchema = z.object({

@@ -288,9 +288,16 @@ export const payments = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    // 'subject' 现在是双语义：单科购买时填学科名（高数/线代/概率论/其他），
+    // 订阅时填 plan 名（plus/pro），UI 通过 plan 字段区分而不依赖 subject。
     subject: text("subject").notNull(),
     amountCny: real("amount_cny").notNull(),
     status: text("status").notNull().default("pending"), // pending | paid | refunded | failed
+    // 'plan' 区分本次付款的商品类型：
+    //   null → 旧版单科一次性购买（保留兼容；status='paid' 视作永久权益）
+    //   'plus' → Plus 月订阅，notify 时创建 subscriptions 行 +30 天
+    //   'pro' → Pro 月订阅，同上
+    plan: text("plan"),
     channel: text("channel").notNull(),
     // wechat_manual | alipay_manual | epay_alipay | epay_wxpay | redemption_code
     notes: text("notes"),
@@ -445,3 +452,50 @@ export const systemSettings = sqliteTable("system_settings", {
     onDelete: "set null",
   }),
 });
+
+/**
+ * Free / Plus / Pro 月订阅。Free 不入库（默认状态就是 free，没行就是没订阅）。
+ *
+ * 一次付款 → 创建一行 active 订阅，period_end = now + 30 天。
+ * 用户在 active 期内再次付同 plan → period_end += 30 天（延期续费）。
+ * 用户从 plus 升 pro：本期 plus 保留至 period_end，但 getUserPlan() 总返回最高 active 行
+ * （pro > plus），所以行为正确，pro 立即生效。
+ *
+ * 单科 19.9 永久权益（payments.status='paid'）跟订阅独立 — 老用户保留旧权益 +
+ * 可叠加订阅（lib/subscription.ts 把单科永久视作 unlimited bypass）。
+ */
+export const subscriptions = sqliteTable(
+  "subscriptions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    plan: text("plan").notNull(), // 'plus' | 'pro'
+    status: text("status").notNull().default("active"), // 'active' | 'expired' | 'cancelled'
+    currentPeriodStart: integer("current_period_start", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    currentPeriodEnd: integer("current_period_end", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    cancelledAt: integer("cancelled_at", { mode: "timestamp_ms" }),
+    paymentId: text("payment_id").references(() => payments.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => ({
+    // 主热路径：getUserPlan() 按 user_id 查 status=active + period_end > now 的行
+    userActiveIdx: index("subscriptions_user_active_idx").on(
+      t.userId,
+      t.status,
+      t.currentPeriodEnd,
+    ),
+    paymentIdx: index("subscriptions_payment_idx").on(t.paymentId),
+  }),
+);

@@ -2,20 +2,29 @@ import "server-only";
 
 import { and, eq, inArray } from "drizzle-orm";
 
-import { db, payments, usageCounters } from "@/lib/db";
+import { db, usageCounters } from "@/lib/db";
+import {
+  type EffectivePlan,
+  PLAN_LIMITS,
+  getUserPlan,
+} from "@/lib/subscription";
 import { readSetting } from "@/lib/system-settings";
 
 /**
- * M2 mirror · Subject Credits monthly quota gate.
+ * M2 mirror · 月配额 + 订阅级 limit。
  *
- * Rules (mirrors new-api logic, adapted to Linkao):
- * - Paid users (have at least one payments row with status='paid') are
- *   considered unlocked and bypass the free-tier limit entirely.
- * - Unpaid users get a per-route, per-calendar-month allowance read from
- *   system_settings.free_tier_quota.
- * - Setting a quota to 0 effectively bans the free tier for that route.
- * - The counter itself is bumped in lib/ai-usage.ts after a successful call,
- *   so usage = "how many successful runs this month".
+ * 演进自最初的 paid 永久 bypass 模型 — 现在支持 Free/Plus/Pro 三档：
+ *
+ *   plan         | extract | gen | grade | sprint | bypass
+ *   -------------+---------+-----+-------+--------+--------
+ *   free         |    1    |  20 |   60  |    3   |  no
+ *   plus         |    5    | 100 |  300  |   10   |  no
+ *   pro          |   inf   | inf |   inf |  inf   |  yes
+ *   legacy_lifetime (单科 19.9 老用户) | inf | inf | inf | inf | yes
+ *
+ * Free 配额仍然支持 admin 通过 system_settings.free_tier_quota 调整（兼容旧逻辑）。
+ * Plus 配额来自 PLAN_LIMITS.plus 常量 — 暂时硬编码不暴露给 admin，因为 Plus
+ * 是个商业承诺数字，不该被 UI 随手改。
  */
 
 export type QuotaKind = "extract" | "generate_questions" | "grade" | "sprint_plan";
@@ -25,12 +34,41 @@ export interface QuotaStatus {
   limit: number;
   used: number;
   remaining: number;
+  /** 旧字段保留兼容；新代码用 plan 字段判断更精确。 */
   isPaid: boolean;
+  /** 用户当前生效的 plan（free/plus/pro/legacy_lifetime）。 */
+  plan: EffectivePlan;
 }
 
 function currentMonthYmd(): string {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function unlimitedStatus(plan: EffectivePlan): QuotaStatus {
+  return {
+    allowed: true,
+    limit: Infinity,
+    used: 0,
+    remaining: Infinity,
+    isPaid: plan === "pro" || plan === "legacy_lifetime",
+    plan,
+  };
+}
+
+/**
+ * 给定 plan，返回该 plan 对该 route 的 limit。Free 走 admin 可调的
+ * free_tier_quota；Plus 走硬编码的 PLAN_LIMITS.plus。
+ */
+async function planLimitFor(
+  plan: EffectivePlan,
+  kind: QuotaKind,
+): Promise<number | "unlimited"> {
+  if (plan === "pro" || plan === "legacy_lifetime") return "unlimited";
+  if (plan === "plus") return PLAN_LIMITS.plus[kind];
+  // free
+  const freeCfg = await readSetting("free_tier_quota");
+  return freeCfg[kind] ?? 0;
 }
 
 /**
@@ -51,31 +89,18 @@ export async function checkQuota(
       used: 0,
       remaining: Infinity,
       isPaid: false,
+      plan: "free",
     };
   }
 
-  // Paid bypass: any prior 'paid' payment row is enough to lift the free
-  // tier for this user across all subjects + all routes.
-  const paid = await db
-    .select({ id: payments.id })
-    .from(payments)
-    .where(and(eq(payments.userId, userId), eq(payments.status, "paid")))
-    .limit(1);
-  const isPaid = paid.length > 0;
-  if (isPaid) {
-    return {
-      allowed: true,
-      limit: Infinity,
-      used: 0,
-      remaining: Infinity,
-      isPaid: true,
-    };
-  }
+  const plan = await getUserPlan(userId);
 
-  // Free tier — read setting + current counter.
-  const quotaCfg = await readSetting("free_tier_quota");
-  const limit = quotaCfg[kind] ?? 0;
+  // Pro / legacy_lifetime → unlimited bypass
+  const limitOrInf = await planLimitFor(plan, kind);
+  if (limitOrInf === "unlimited") return unlimitedStatus(plan);
 
+  // Free / Plus → 实际查计数器
+  const limit = limitOrInf;
   const monthYmd = currentMonthYmd();
   const [counter] = await db
     .select({ usedN: usageCounters.usedN })
@@ -97,6 +122,7 @@ export async function checkQuota(
     used,
     remaining,
     isPaid: false,
+    plan,
   };
 }
 
@@ -114,41 +140,32 @@ export async function snapshotAllQuotas(
     "sprint_plan",
   ];
   if (!userId) {
-    const inf = {
+    const inf: QuotaStatus = {
       allowed: true,
       limit: Infinity,
       used: 0,
       remaining: Infinity,
       isPaid: false,
-    } as QuotaStatus;
+      plan: "free",
+    };
     return Object.fromEntries(kinds.map((k) => [k, inf])) as Record<
       QuotaKind,
       QuotaStatus
     >;
   }
 
-  // Single round-trip for paid check + counters.
-  const [paidRow] = await db
-    .select({ id: payments.id })
-    .from(payments)
-    .where(and(eq(payments.userId, userId), eq(payments.status, "paid")))
-    .limit(1);
-  const isPaid = !!paidRow;
-  if (isPaid) {
-    const v: QuotaStatus = {
-      allowed: true,
-      limit: Infinity,
-      used: 0,
-      remaining: Infinity,
-      isPaid: true,
-    };
+  const plan = await getUserPlan(userId);
+
+  // Pro / legacy_lifetime → 全部 unlimited，一次返回即可
+  if (plan === "pro" || plan === "legacy_lifetime") {
+    const v = unlimitedStatus(plan);
     return Object.fromEntries(kinds.map((k) => [k, v])) as Record<
       QuotaKind,
       QuotaStatus
     >;
   }
 
-  const quotaCfg = await readSetting("free_tier_quota");
+  // Free / Plus → 单次拉 counters 后按 plan 计算 limit
   const monthYmd = currentMonthYmd();
   const counters = await db
     .select({ kind: usageCounters.kind, usedN: usageCounters.usedN })
@@ -163,9 +180,12 @@ export async function snapshotAllQuotas(
   const usedMap = new Map<string, number>();
   for (const c of counters) usedMap.set(c.kind, c.usedN);
 
+  const freeCfg = plan === "free" ? await readSetting("free_tier_quota") : null;
+
   const result = {} as Record<QuotaKind, QuotaStatus>;
   for (const k of kinds) {
-    const limit = quotaCfg[k] ?? 0;
+    const limit =
+      plan === "plus" ? PLAN_LIMITS.plus[k] : (freeCfg?.[k] ?? 0);
     const used = usedMap.get(k) ?? 0;
     result[k] = {
       allowed: used < limit,
@@ -173,6 +193,7 @@ export async function snapshotAllQuotas(
       used,
       remaining: Math.max(0, limit - used),
       isPaid: false,
+      plan,
     };
   }
   return result;
