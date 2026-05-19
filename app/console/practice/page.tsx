@@ -236,12 +236,12 @@ export default function PracticePage() {
     fallbackTitle: string,
   ): boolean {
     if (status !== 429 || data.error !== "quota_exceeded") return false;
-    const desc = data.message || "本月免费额度已用完，升级单科即可不限次。";
+    const desc = data.message || "本月免费额度已用完，升级订阅即可不限次。";
     const billingHref = `/console/billing?subject=${encodeURIComponent(subject)}`;
     toast.error(fallbackTitle, {
       description: desc,
       action: {
-        label: "解锁单科",
+        label: "升级订阅",
         onClick: () => {
           window.location.href = billingHref;
         },
@@ -250,6 +250,25 @@ export default function PracticePage() {
     });
     void refreshQuota();
     return true;
+  }
+
+  /**
+   * AI route 成功后看 meta.charge — source='wallet' 且实际扣了费就 toast 告知
+   * 用户"本次扣 ¥X.XX 余 ¥Y.YY"。配额路径 (quota/unlimited) 不打扰。
+   */
+  function notifyChargeFromWallet(data: {
+    meta?: { charge?: { source?: string; chargedCents?: number; balanceAfterCents?: number } };
+  }): void {
+    const c = data.meta?.charge;
+    if (!c || c.source !== "wallet" || !c.chargedCents) return;
+    const yuan = (n: number) => (Math.round(n) / 100).toFixed(2);
+    toast(`钱包扣费 ¥${yuan(c.chargedCents)}`, {
+      description:
+        c.balanceAfterCents != null
+          ? `余额 ¥${yuan(c.balanceAfterCents)} · 配额耗尽自动走钱包`
+          : "配额耗尽自动走钱包",
+      duration: 4000,
+    });
   }
 
   // Handlers
@@ -299,6 +318,7 @@ export default function PracticePage() {
         ),
       );
       void refreshQuota();
+      notifyChargeFromWallet(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setUploadError(msg);
@@ -355,6 +375,7 @@ export default function PracticePage() {
         setPersistedQuestionIdMap({});
       }
       void refreshQuota();
+      notifyChargeFromWallet(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setGenerateError(msg);
@@ -395,6 +416,7 @@ export default function PracticePage() {
       }
       setSprintPlan(data.plan as SprintPlan);
       void refreshQuota();
+      notifyChargeFromWallet(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setSprintError(msg);
@@ -429,6 +451,7 @@ export default function PracticePage() {
       }
       setGrades((prev) => ({ ...prev, [q.id]: data.grade as GradeResult }));
       void refreshQuota();
+      notifyChargeFromWallet(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
       setGradeError(msg);

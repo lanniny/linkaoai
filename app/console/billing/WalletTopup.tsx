@@ -1,6 +1,7 @@
 "use client";
 
-import { Wallet, Zap } from "lucide-react";
+import { Receipt, Wallet, Zap } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -77,9 +78,18 @@ export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
           <Wallet className="h-4 w-4" />
           钱包余额 · 按量付费
         </h2>
-        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
-          pay-as-you-go
-        </span>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/console/wallet"
+            className="inline-flex items-center gap-1 rounded-full border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-medium text-blue-700 transition hover:bg-blue-100"
+          >
+            <Receipt className="h-2.5 w-2.5" />
+            流水
+          </Link>
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+            pay-as-you-go
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

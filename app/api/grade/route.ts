@@ -172,7 +172,7 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    void chargeUsage({
+    const charge = await chargeUsage({
       userId: userIdForLog,
       quotaSource: quota.source,
       kind: "grade",
@@ -313,6 +313,7 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
         usage: response.usage,
         stopReason: response.stop_reason,
         graded_by: response.model,
+        charge,
       },
       persisted,
     });

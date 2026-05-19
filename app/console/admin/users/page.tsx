@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 
 import { getUserRole, isRootAdmin, roleLabel } from "@/lib/admin";
 import { auth } from "@/lib/auth";
-import { db, payments, subscriptions, user } from "@/lib/db";
+import { db, payments, subscriptions, user, walletBalance } from "@/lib/db";
 import type { EffectivePlan } from "@/lib/subscription";
 
 import {
@@ -12,6 +12,7 @@ import {
   type UserSubscriptionInfo,
 } from "./UserSubscriptionCell";
 import { UserRoleSelect } from "./UserRoleSelect";
+import { UserWalletCell } from "./UserWalletCell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +47,10 @@ export default async function AdminUsersPage() {
 
   const userIds = users.map((u) => u.id);
 
-  // Fetch all relevant subscription state in one shot — avoids N+1 per user
-  // when computing effective plan for the table.
-  const [unlockedPaidRows, activeSubRows, legacyRows] = await Promise.all([
+  // Fetch all relevant subscription + wallet state in one shot — avoids
+  // N+1 per user when computing effective plan + balance for the table.
+  const [unlockedPaidRows, activeSubRows, legacyRows, walletRows] =
+    await Promise.all([
     // Paid single-subject (legacy permanent unlock) — listed in "已解锁" column
     db
       .select({
@@ -94,7 +96,20 @@ export default async function AdminUsersPage() {
             ),
           )
       : Promise.resolve([]),
+    // Wallet balances — non-zero rows only (default 0 doesn't need a row)
+    userIds.length > 0
+      ? db
+          .select({
+            userId: walletBalance.userId,
+            balanceCents: walletBalance.balanceCents,
+          })
+          .from(walletBalance)
+          .where(inArray(walletBalance.userId, userIds))
+      : Promise.resolve([]),
   ]);
+
+  const walletByUser: Record<string, number> = {};
+  for (const w of walletRows) walletByUser[w.userId] = w.balanceCents;
 
   // Index by userId so the row render is O(1) per user
   const unlockedByUser: Record<string, Set<string>> = {};
@@ -155,6 +170,7 @@ export default async function AdminUsersPage() {
               <th className="px-3 py-2 text-left font-medium">邮箱 / 昵称</th>
               <th className="px-3 py-2 text-left font-medium">角色</th>
               <th className="px-3 py-2 text-left font-medium">订阅</th>
+              <th className="px-3 py-2 text-left font-medium">钱包</th>
               <th className="px-3 py-2 text-left font-medium">已解锁学科</th>
               <th className="px-3 py-2 text-left font-medium">注册</th>
               <th className="px-3 py-2 text-left font-medium">✓</th>
@@ -201,6 +217,12 @@ export default async function AdminUsersPage() {
                   </td>
                   <td className="px-3 py-2">
                     <UserSubscriptionCell userId={u.id} initial={subInfo} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <UserWalletCell
+                      userId={u.id}
+                      initialBalanceCents={walletByUser[u.id] ?? 0}
+                    />
                   </td>
                   <td className="px-3 py-2">
                     {unlocked.length === 0 ? (

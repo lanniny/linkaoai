@@ -221,7 +221,7 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    void chargeUsage({
+    const charge = await chargeUsage({
       userId: userIdForLog,
       quotaSource: quota.source,
       kind: "generate_questions",
@@ -315,6 +315,7 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
         model: response.model,
         usage: response.usage,
         stopReason: response.stop_reason,
+        charge,
       },
       persisted,
     });

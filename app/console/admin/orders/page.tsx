@@ -4,6 +4,7 @@ import { Receipt } from "lucide-react";
 import { db, payments, user } from "@/lib/db";
 import { OrderMarkPaidButton } from "./OrderMarkPaidButton";
 import { OrderRefundButton } from "./OrderRefundButton";
+import { WalletReconcileBanner } from "./WalletReconcileBanner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +78,9 @@ export default async function AdminOrdersPage() {
           手动渠道（微信/支付宝）需 admin 手工标记为 paid 才解锁
         </p>
       </header>
+
+      {/* 钱包对账 banner — 列出 paid wallet 订单中没对应 topup 流水的孤儿 */}
+      <WalletReconcileBanner />
 
       <section className="grid grid-cols-4 gap-3 text-center">
         <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">

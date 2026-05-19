@@ -18,6 +18,19 @@ import { cnyToCents, consume } from "@/lib/wallet";
  * 但万一并发场景余额刚被扣完，这里 consume 返回 ok=false，本次 AI 成功用户
  * "免单"一次 — 比让用户失败更友好。
  */
+/**
+ * 扣费结果 — 返回给 AI route 让 response 体可以告知用户"本次扣了 ¥X 钱包"。
+ *
+ * source='wallet' + ok=true → 扣费成功，chargedCents > 0
+ * source='wallet' + ok=false → 钱包余额并发耗尽（罕见）
+ * source !== 'wallet' → 不返这个字段
+ */
+export interface ChargeResult {
+  source: NonNullable<QuotaStatus["source"]> | "skipped";
+  chargedCents?: number;
+  balanceAfterCents?: number;
+}
+
 export async function chargeUsage(args: {
   userId: string | null;
   quotaSource: QuotaStatus["source"];
@@ -25,17 +38,17 @@ export async function chargeUsage(args: {
   model: string;
   promptTokens: number | null;
   completionTokens: number | null;
-}): Promise<void> {
-  if (!args.userId) return;
-  if (args.quotaSource === "unlimited") return;
+}): Promise<ChargeResult> {
+  if (!args.userId) return { source: "skipped" };
+  if (args.quotaSource === "unlimited") return { source: "unlimited" };
   if (args.quotaSource === "quota") {
     void incUsageCounter(args.userId, args.kind);
-    return;
+    return { source: "quota" };
   }
   if (args.quotaSource === "wallet") {
     if (args.promptTokens == null || args.completionTokens == null) {
       // 无 token usage 信息 → 跳过扣费（保守，不乱扣）
-      return;
+      return { source: "wallet", chargedCents: 0 };
     }
     const costCny = estimateCostCny(
       args.model,
@@ -43,23 +56,31 @@ export async function chargeUsage(args: {
       args.completionTokens,
     );
     const cents = cnyToCents(costCny);
-    if (cents <= 0) return;
+    if (cents <= 0) return { source: "wallet", chargedCents: 0 };
     try {
       const result = await consume({
         userId: args.userId,
         amountCents: cents,
         description: `${args.kind} · ${args.model} · ${args.promptTokens}+${args.completionTokens} tokens`,
       });
-      if (!result.ok) {
-        console.warn(
-          `[charge] wallet exhausted mid-flight for user=${args.userId} kind=${args.kind} cents=${cents} balance=${result.balance}`,
-        );
+      if (result.ok) {
+        return {
+          source: "wallet",
+          chargedCents: cents,
+          balanceAfterCents: result.balanceAfterCents,
+        };
       }
+      console.warn(
+        `[charge] wallet exhausted mid-flight for user=${args.userId} kind=${args.kind} cents=${cents} balance=${result.balance}`,
+      );
+      return { source: "wallet", chargedCents: 0, balanceAfterCents: result.balance };
     } catch (err) {
       console.warn(
         "[charge] wallet consume failed:",
         err instanceof Error ? err.message : err,
       );
+      return { source: "wallet", chargedCents: 0 };
     }
   }
+  return { source: "skipped" };
 }

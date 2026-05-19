@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    void chargeUsage({
+    const charge = await chargeUsage({
       userId: userIdForLog,
       quotaSource: quota.source,
       kind: "extract",
@@ -307,6 +307,7 @@ export async function POST(req: NextRequest) {
         model: response.model,
         usage: response.usage,
         stopReason: response.stop_reason,
+        charge,
       },
       persisted,
     });
