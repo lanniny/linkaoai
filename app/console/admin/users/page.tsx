@@ -1,10 +1,16 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { ShieldCheck } from "lucide-react";
 import { headers } from "next/headers";
 
 import { getUserRole, isRootAdmin, roleLabel } from "@/lib/admin";
 import { auth } from "@/lib/auth";
-import { db, payments, user } from "@/lib/db";
+import { db, payments, subscriptions, user } from "@/lib/db";
+import type { EffectivePlan } from "@/lib/subscription";
+
+import {
+  UserSubscriptionCell,
+  type UserSubscriptionInfo,
+} from "./UserSubscriptionCell";
 import { UserRoleSelect } from "./UserRoleSelect";
 
 export const runtime = "nodejs";
@@ -25,38 +31,111 @@ export default async function AdminUsersPage() {
   const viewer = session?.user;
   const viewerIsRoot = isRootAdmin(viewer);
 
-  const [users, paidRows] = await Promise.all([
-    db
-      .select({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        createdAt: user.createdAt,
-        emailVerified: user.emailVerified,
-      })
-      .from(user)
-      .orderBy(desc(user.createdAt))
-      .limit(1000),
+  const users = await db
+    .select({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      createdAt: user.createdAt,
+      emailVerified: user.emailVerified,
+    })
+    .from(user)
+    .orderBy(desc(user.createdAt))
+    .limit(1000);
+
+  const userIds = users.map((u) => u.id);
+
+  // Fetch all relevant subscription state in one shot — avoids N+1 per user
+  // when computing effective plan for the table.
+  const [unlockedPaidRows, activeSubRows, legacyRows] = await Promise.all([
+    // Paid single-subject (legacy permanent unlock) — listed in "已解锁" column
     db
       .select({
         userId: payments.userId,
         subject: payments.subject,
+        plan: payments.plan,
       })
       .from(payments)
-      .where(eq(payments.status, "paid")),
+      .where(
+        and(
+          eq(payments.status, "paid"),
+          userIds.length > 0 ? inArray(payments.userId, userIds) : eq(payments.userId, ""),
+        ),
+      ),
+    // All active subscriptions whose period is still alive
+    userIds.length > 0
+      ? db
+          .select({
+            id: subscriptions.id,
+            userId: subscriptions.userId,
+            plan: subscriptions.plan,
+            currentPeriodEnd: subscriptions.currentPeriodEnd,
+          })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.status, "active"),
+              gt(subscriptions.currentPeriodEnd, new Date()),
+              inArray(subscriptions.userId, userIds),
+            ),
+          )
+      : Promise.resolve([]),
+    // Legacy lifetime detection — paid + plan IS NULL means single-subject永久
+    userIds.length > 0
+      ? db
+          .select({ userId: payments.userId })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.status, "paid"),
+              isNull(payments.plan),
+              inArray(payments.userId, userIds),
+            ),
+          )
+      : Promise.resolve([]),
   ]);
 
-  const unlockedMap: Record<string, Set<string>> = {};
-  for (const p of paidRows) {
+  // Index by userId so the row render is O(1) per user
+  const unlockedByUser: Record<string, Set<string>> = {};
+  for (const p of unlockedPaidRows) {
+    // 只列 plan=null 的单科购买行作为"已解锁学科"显示（plan='plus'/'pro' 的
+    // 订阅订单 subject 字段填的是 "Plus 月订阅"，不该显示在已解锁列）
+    if (p.plan !== null) continue;
     const k = p.userId;
     if (!k) continue;
-    if (!unlockedMap[k]) unlockedMap[k] = new Set();
-    unlockedMap[k].add(p.subject);
+    if (!unlockedByUser[k]) unlockedByUser[k] = new Set();
+    unlockedByUser[k].add(p.subject);
+  }
+
+  const legacySet = new Set(legacyRows.map((r) => r.userId).filter(Boolean) as string[]);
+
+  const subsByUser: Record<
+    string,
+    Array<{ id: string; plan: "plus" | "pro"; currentPeriodEndMs: number }>
+  > = {};
+  for (const s of activeSubRows) {
+    const k = s.userId;
+    if (!subsByUser[k]) subsByUser[k] = [];
+    subsByUser[k].push({
+      id: s.id,
+      plan: s.plan as "plus" | "pro",
+      currentPeriodEndMs: s.currentPeriodEnd
+        ? new Date(s.currentPeriodEnd).getTime()
+        : 0,
+    });
+  }
+
+  function computePlan(userId: string): EffectivePlan {
+    if (legacySet.has(userId)) return "legacy_lifetime";
+    const subs = subsByUser[userId] ?? [];
+    if (subs.some((s) => s.plan === "pro")) return "pro";
+    if (subs.some((s) => s.plan === "plus")) return "plus";
+    return "free";
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-6">
+    <div className="mx-auto max-w-6xl space-y-5 p-6">
       <header className="flex items-center justify-between">
         <div>
           <h2 className="flex items-center gap-1.5 text-sm font-semibold">
@@ -64,7 +143,7 @@ export default async function AdminUsersPage() {
             用户管理（{users.length}）
           </h2>
           <p className="text-xs text-zinc-500">
-            按注册时间倒序 · 仅 root 可修改角色
+            按注册时间倒序 · 仅 root 可修改角色 · admin 可手工授予/撤销订阅
           </p>
         </div>
       </header>
@@ -75,17 +154,26 @@ export default async function AdminUsersPage() {
             <tr>
               <th className="px-3 py-2 text-left font-medium">邮箱 / 昵称</th>
               <th className="px-3 py-2 text-left font-medium">角色</th>
-              <th className="px-3 py-2 text-left font-medium">已解锁</th>
+              <th className="px-3 py-2 text-left font-medium">订阅</th>
+              <th className="px-3 py-2 text-left font-medium">已解锁学科</th>
               <th className="px-3 py-2 text-left font-medium">注册</th>
-              <th className="px-3 py-2 text-left font-medium">邮箱已验证</th>
+              <th className="px-3 py-2 text-left font-medium">✓</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 text-xs">
             {users.map((u) => {
               const role = getUserRole(u);
-              const unlocked = unlockedMap[u.id]
-                ? Array.from(unlockedMap[u.id]!)
+              const unlocked = unlockedByUser[u.id]
+                ? Array.from(unlockedByUser[u.id]!)
                 : [];
+              const subInfo: UserSubscriptionInfo = {
+                effectivePlan: computePlan(u.id),
+                activeRows: (subsByUser[u.id] ?? []).map((s) => ({
+                  id: s.id,
+                  plan: s.plan,
+                  currentPeriodEnd: s.currentPeriodEndMs,
+                })),
+              };
               return (
                 <tr key={u.id} className="hover:bg-zinc-50/60">
                   <td className="px-3 py-2 font-mono">
@@ -110,6 +198,9 @@ export default async function AdminUsersPage() {
                         {roleLabel(role)}
                       </span>
                     )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <UserSubscriptionCell userId={u.id} initial={subInfo} />
                   </td>
                   <td className="px-3 py-2">
                     {unlocked.length === 0 ? (
