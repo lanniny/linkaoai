@@ -104,10 +104,20 @@ const TONES = {
   },
 } as const;
 
+type PayChannel = "alipay" | "wxpay";
+
+/** intent channel ↔ epay type 的映射 — 走自动 EPay 通道。 */
+const INTENT_CHANNEL: Record<PayChannel, "epay_alipay" | "epay_wxpay"> = {
+  alipay: "epay_alipay",
+  wxpay: "epay_wxpay",
+};
+
 export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
   const [pendingPlan, setPendingPlan] = useState<"plus" | "pro" | null>(null);
   // Pro 月/年切换 — 默认年付（先呈现节省 17% 的价格锚点）
   const [proCycle, setProCycle] = useState<ProCycle>("yearly");
+  // 支付渠道切换 — 默认支付宝（国内最常用）
+  const [payChannel, setPayChannel] = useState<PayChannel>("alipay");
 
   // 找当前 active 同 plan 行的 period_end，用于显示"距过期 N 天"
   const subByPlan: Record<"plus" | "pro", ActiveSubscription | undefined> = {
@@ -131,7 +141,7 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({
           purchase_type: purchaseType,
-          channel: "epay_alipay",
+          channel: INTENT_CHANNEL[payChannel],
         }),
       });
       const intentData = await intentRes.json();
@@ -145,7 +155,7 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({
           order_id: intentData.order.id,
-          type: "alipay",
+          type: payChannel,
         }),
       });
       const epayData = await epayRes.json();
@@ -160,7 +170,7 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
         return;
       }
 
-      toast("跳转到支付页…", {
+      toast(`跳转${payChannel === "alipay" ? "支付宝" : "微信"}…`, {
         description: "支付完成会返回 /console/billing/history",
       });
       // location.assign() instead of href= to satisfy react-hooks/immutability
@@ -209,6 +219,37 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
           Pro 不限次 · 还可以叠加月订阅给自己更宽松的额度
         </div>
       )}
+
+      {/* 支付渠道选择 — 影响所有 plan 卡的下单流程 */}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-zinc-600">支付方式：</span>
+        <div className="inline-flex rounded-lg border border-zinc-300 bg-white p-0.5">
+          <button
+            type="button"
+            onClick={() => setPayChannel("alipay")}
+            disabled={pendingPlan !== null}
+            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
+              payChannel === "alipay"
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 hover:bg-blue-50"
+            }`}
+          >
+            💙 支付宝
+          </button>
+          <button
+            type="button"
+            onClick={() => setPayChannel("wxpay")}
+            disabled={pendingPlan !== null}
+            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
+              payChannel === "wxpay"
+                ? "bg-emerald-600 text-white"
+                : "text-zinc-600 hover:bg-emerald-50"
+            }`}
+          >
+            💚 微信
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {(["free", "plus", "pro"] as const).map((p) => {

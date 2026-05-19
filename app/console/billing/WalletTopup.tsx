@@ -16,12 +16,20 @@ function centsToCny(cents: number): string {
 
 const PRESETS = [10, 30, 50, 100] as const;
 
+type PayChannel = "alipay" | "wxpay";
+const INTENT_CHANNEL: Record<PayChannel, "epay_alipay" | "epay_wxpay"> = {
+  alipay: "epay_alipay",
+  wxpay: "epay_wxpay",
+};
+
 export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
   const [amount, setAmount] = useState<number>(30);
   const [pending, setPending] = useState(false);
   // Custom amount when "其他" tab is selected
   const [customAmount, setCustomAmount] = useState<string>("");
   const [useCustom, setUseCustom] = useState(false);
+  // 支付渠道
+  const [payChannel, setPayChannel] = useState<PayChannel>("alipay");
 
   async function handleTopup() {
     const finalAmount = useCustom ? Number(customAmount) : amount;
@@ -36,7 +44,7 @@ export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({
           purchase_type: "wallet_topup",
-          channel: "epay_alipay",
+          channel: INTENT_CHANNEL[payChannel],
           amount_cny: finalAmount,
         }),
       });
@@ -50,7 +58,7 @@ export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({
           order_id: intentData.order.id,
-          type: "alipay",
+          type: payChannel,
         }),
       });
       const epayData = await epayRes.json();
@@ -60,7 +68,7 @@ export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
         });
         return;
       }
-      toast("跳转支付宝充值…");
+      toast(`跳转${payChannel === "alipay" ? "支付宝" : "微信"}充值…`);
       window.location.assign(epayData.payment_url as string);
     } catch (err) {
       toast.error("充值失败", {
@@ -111,6 +119,37 @@ export function WalletTopup({ balanceCents, monthlySpendCents }: Props) {
         💡 配额耗尽（Free / Plus 用户）后自动用钱包余额按 AI 实际 token 成本扣费 ·
         Pro 用户 unlimited 不扣钱包 · 余额永不过期
       </p>
+
+      {/* 支付渠道选择 */}
+      <div>
+        <div className="text-[11px] font-medium text-zinc-700">支付方式</div>
+        <div className="mt-1.5 inline-flex rounded-lg border border-zinc-300 bg-white p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setPayChannel("alipay")}
+            disabled={pending}
+            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
+              payChannel === "alipay"
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 hover:bg-blue-50"
+            }`}
+          >
+            💙 支付宝
+          </button>
+          <button
+            type="button"
+            onClick={() => setPayChannel("wxpay")}
+            disabled={pending}
+            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
+              payChannel === "wxpay"
+                ? "bg-emerald-600 text-white"
+                : "text-zinc-600 hover:bg-emerald-50"
+            }`}
+          >
+            💚 微信
+          </button>
+        </div>
+      </div>
 
       <div>
         <div className="text-[11px] font-medium text-zinc-700">充值金额</div>
