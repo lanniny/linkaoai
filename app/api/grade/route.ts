@@ -9,7 +9,8 @@ import {
   type ResolvedChannel,
 } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
-import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
+import { emitAiUsage } from "@/lib/ai-usage";
+import { chargeUsage } from "@/lib/charge";
 import { attempts, questions, weaknessPoints } from "@/lib/db";
 import { assertNotMaintenance } from "@/lib/maintenance";
 import { getPersistContext } from "@/lib/persistence";
@@ -171,7 +172,14 @@ ${user_answer.trim() === "" ? "（学生未作答，留空）" : user_answer}
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    if (userIdForLog) void incUsageCounter(userIdForLog, "grade");
+    void chargeUsage({
+      userId: userIdForLog,
+      quotaSource: quota.source,
+      kind: "grade",
+      model: response.model,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",

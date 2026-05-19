@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, payments } from "@/lib/db";
 import { getEpayConfig, verifyEpayCallback } from "@/lib/epay";
 import { issueSubscriptionFromPayment } from "@/lib/subscription";
+import { cnyToCents, topup } from "@/lib/wallet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // never cache callbacks
@@ -73,6 +74,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         userId: payments.userId,
         plan: payments.plan,
         periodDays: payments.periodDays,
+        amountCny: payments.amountCny,
       });
 
     // 订阅类付款 → 创建/延期 subscriptions 行（fire-and-forget，失败不阻塞 EPay）
@@ -83,6 +85,22 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         userId: row.userId,
         plan: row.plan,
         periodDays: row.periodDays ?? undefined,
+      });
+    }
+
+    // 钱包充值类付款 → wallet.topup 入账（同样 fire-and-forget，失败时
+    // 流水会缺一条但 payment status 已 paid，admin 可手工补单）
+    if (row && row.plan === "wallet") {
+      void topup({
+        userId: row.userId,
+        amountCents: cnyToCents(Number(row.amountCny)),
+        paymentId: row.id,
+        description: `EPay 充值 ¥${Number(row.amountCny).toFixed(2)}`,
+      }).catch((err) => {
+        console.error(
+          "[epay/notify] wallet topup failed:",
+          err instanceof Error ? err.message : err,
+        );
       });
     }
   } catch (err) {

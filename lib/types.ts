@@ -199,6 +199,7 @@ export const purchaseTypeSchema = z.enum([
   "plus_monthly",
   "pro_monthly",
   "pro_yearly",
+  "wallet_topup",
 ]);
 export type PurchaseType = z.infer<typeof purchaseTypeSchema>;
 
@@ -208,10 +209,17 @@ export const paymentIntentRequestSchema = z
     subject: subjectSchema.optional(),
     channel: paymentChannelSchema,
     notes: z.string().max(200).optional(),
+    // 仅 wallet_topup 用：充值金额（CNY）。预设 10/30/50/100 但允许自由值；
+    // 上限 1000 元/笔 防误操作。
+    amount_cny: z.number().min(1).max(1000).optional(),
   })
   .refine(
     (d) => d.purchase_type !== "single_subject" || d.subject !== undefined,
     { message: "single_subject 必须传 subject", path: ["subject"] },
+  )
+  .refine(
+    (d) => d.purchase_type !== "wallet_topup" || d.amount_cny !== undefined,
+    { message: "wallet_topup 必须传 amount_cny", path: ["amount_cny"] },
   );
 export type PaymentIntentRequest = z.infer<typeof paymentIntentRequestSchema>;
 

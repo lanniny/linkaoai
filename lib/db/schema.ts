@@ -458,6 +458,62 @@ export const systemSettings = sqliteTable("system_settings", {
 });
 
 /**
+ * 钱包余额 — pay-as-you-go 模式。订阅是定额配额，钱包是按 AI cost 扣费。
+ * 互补：Free/Plus 配额耗尽时降级钱包；Pro/legacy 不扣钱包（unlimited）。
+ *
+ * 余额用 cents (¥0.01) 整数避免浮点 — 1.00 元 = 100 cents。AI cost_cny
+ * 是浮点（input/output token × price × USD-CNY），落地前 round to cents。
+ */
+export const walletBalance = sqliteTable("wallet_balance", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  balanceCents: integer("balance_cents").notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
+/**
+ * 钱包流水 — append-only audit trail of every wallet movement.
+ *
+ * type:
+ *   'topup'   → 充值（amount_cents > 0，关联 payment_id）
+ *   'consume' → AI 调用扣费（amount_cents < 0，关联 usage_log_id）
+ *   'refund'  → 退款入账（amount_cents > 0，关联 payment_id）
+ *
+ * balance_after_cents 是 snapshot — 即使后来对账 / 回溯，每一笔都自带"当时"
+ * 的余额，便于审计。
+ */
+export const walletTransactions = sqliteTable(
+  "wallet_transactions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // 'topup' | 'consume' | 'refund'
+    amountCents: integer("amount_cents").notNull(),
+    balanceAfterCents: integer("balance_after_cents").notNull(),
+    paymentId: text("payment_id").references(() => payments.id, {
+      onDelete: "set null",
+    }),
+    usageLogId: text("usage_log_id"), // refs ai_usage_logs.id — 不强 FK 因为
+    //                                   ai_usage_logs 是 telemetry 可能被清理
+    description: text("description"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => ({
+    userTimeIdx: index("wallet_txn_user_time_idx").on(t.userId, t.createdAt),
+    typeIdx: index("wallet_txn_type_idx").on(t.type),
+  }),
+);
+
+/**
  * Free / Plus / Pro 月订阅。Free 不入库（默认状态就是 free，没行就是没订阅）。
  *
  * 一次付款 → 创建一行 active 订阅，period_end = now + 30 天。

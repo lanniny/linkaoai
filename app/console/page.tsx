@@ -30,6 +30,7 @@ import {
   getUserPlan,
   listActiveSubscriptions,
 } from "@/lib/subscription";
+import { getBalance } from "@/lib/wallet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,11 +63,13 @@ export default async function ConsoleOverviewPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) redirect("/login?next=/console");
   const userId = session.user.id;
-  const [quotaSnapshot, currentPlan, activeSubs] = await Promise.all([
-    snapshotAllQuotas(userId),
-    getUserPlan(userId),
-    listActiveSubscriptions(userId),
-  ]);
+  const [quotaSnapshot, currentPlan, activeSubs, walletBalanceCents] =
+    await Promise.all([
+      snapshotAllQuotas(userId),
+      getUserPlan(userId),
+      listActiveSubscriptions(userId),
+      getBalance(userId),
+    ]);
   // Helper for "距过期还有 N 天" — used by the subscription header card.
   const subByPlan = {
     plus: activeSubs.find((s) => s.plan === "plus"),
@@ -221,8 +224,46 @@ export default async function ConsoleOverviewPage() {
     },
   ];
 
+  // 续费提醒：任一 active 订阅 ≤ 7 天到期时显示醒目 banner（不依赖邮件服务，
+  // 走 UI 提醒 — 用户登录就看到，CTA 直接进 billing 续费）
+  const renewalNeeded = activeSubs.filter(
+    (s) => daysLeft(s.currentPeriodEnd) <= 7,
+  );
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
+      {renewalNeeded.length > 0 && (
+        <section className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-200 text-amber-900">
+                <AlertCircle className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  ⏰ 订阅即将到期
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  {renewalNeeded
+                    .map(
+                      (s) =>
+                        `${s.plan === "pro" ? "Pro" : "Plus"} 还有 ${daysLeft(s.currentPeriodEnd)} 天`,
+                    )
+                    .join(" · ")}{" "}
+                  · 续费保证权益不中断
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/console/billing"
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-700"
+            >
+              立即续费
+            </Link>
+          </div>
+        </section>
+      )}
+
       {/* 当前订阅 — 顶部第一张 card，让用户立刻看到 plan + 剩余天数 */}
       {currentPlan === "legacy_lifetime" ? (
         <section className="rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50 to-amber-50 p-4 shadow-sm">
@@ -325,6 +366,33 @@ export default async function ConsoleOverviewPage() {
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
             >
               升级订阅
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {walletBalanceCents > 0 && (
+        <section className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-blue-100 text-blue-700">
+                💼
+              </span>
+              <span className="text-blue-900">
+                钱包余额：
+                <span className="font-mono font-semibold">
+                  ¥{(walletBalanceCents / 100).toFixed(2)}
+                </span>
+                <span className="ml-1 text-[10px] text-zinc-500">
+                  配额耗尽后自动按 AI cost 扣费
+                </span>
+              </span>
+            </div>
+            <Link
+              href="/console/billing"
+              className="text-[11px] text-blue-700 underline-offset-2 hover:underline"
+            >
+              充值 →
             </Link>
           </div>
         </section>

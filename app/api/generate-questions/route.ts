@@ -8,7 +8,8 @@ import {
   type ResolvedChannel,
 } from "@/lib/anthropic";
 import { bannedTermsQuoted } from "@/lib/compliance";
-import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
+import { emitAiUsage } from "@/lib/ai-usage";
+import { chargeUsage } from "@/lib/charge";
 import { questions } from "@/lib/db";
 import { assertNotMaintenance } from "@/lib/maintenance";
 import { getPersistContext } from "@/lib/persistence";
@@ -220,7 +221,14 @@ ${JSON.stringify(topicsForPrompt, null, 2)}
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    if (userIdForLog) void incUsageCounter(userIdForLog, "generate_questions");
+    void chargeUsage({
+      userId: userIdForLog,
+      quotaSource: quota.source,
+      kind: "generate_questions",
+      model: response.model,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",

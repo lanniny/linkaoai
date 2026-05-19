@@ -6,6 +6,7 @@ import { isAdmin } from "@/lib/admin";
 import { auth } from "@/lib/auth";
 import { db, payments } from "@/lib/db";
 import { issueSubscriptionFromPayment } from "@/lib/subscription";
+import { cnyToCents, topup } from "@/lib/wallet";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
       userId: payments.userId,
       plan: payments.plan,
       periodDays: payments.periodDays,
+      amountCny: payments.amountCny,
     })
     .from(payments)
     .where(eq(payments.id, id))
@@ -69,6 +71,21 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         userId: existing.userId,
         plan: existing.plan,
         periodDays: existing.periodDays ?? undefined,
+      });
+    }
+
+    // 钱包充值类付款 → wallet.topup 入账
+    if (existing.plan === "wallet") {
+      void topup({
+        userId: existing.userId,
+        amountCents: cnyToCents(Number(existing.amountCny)),
+        paymentId: id,
+        description: `admin 手工标记充值 ¥${Number(existing.amountCny).toFixed(2)}`,
+      }).catch((err) => {
+        console.error(
+          "[admin/mark-paid] wallet topup failed:",
+          err instanceof Error ? err.message : err,
+        );
       });
     }
   } catch (err) {

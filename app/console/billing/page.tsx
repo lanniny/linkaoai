@@ -4,8 +4,10 @@ import Link from "next/link";
 
 import { auth } from "@/lib/auth";
 import { getUserPlan, listActiveSubscriptions } from "@/lib/subscription";
+import { getBalance, monthlySpend } from "@/lib/wallet";
 
 import { SubscriptionPlans } from "./SubscriptionPlans";
+import { WalletTopup } from "./WalletTopup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,11 +16,14 @@ export default async function ConsoleBillingPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   const userId = session?.user?.id ?? null;
 
-  // 拿当前 plan + 所有 active 订阅（serializable to client component）
-  const [currentPlan, activeRows] = await Promise.all([
-    getUserPlan(userId),
-    userId ? listActiveSubscriptions(userId) : Promise.resolve([]),
-  ]);
+  // 拿当前 plan + 所有 active 订阅 + 钱包数据
+  const [currentPlan, activeRows, walletBalanceCents, walletSpendCents] =
+    await Promise.all([
+      getUserPlan(userId),
+      userId ? listActiveSubscriptions(userId) : Promise.resolve([]),
+      userId ? getBalance(userId) : Promise.resolve(0),
+      userId ? monthlySpend(userId) : Promise.resolve(0),
+    ]);
   const activeSubs = activeRows
     .filter((r) => r.plan === "plus" || r.plan === "pro")
     .map((r) => ({
@@ -33,6 +38,14 @@ export default async function ConsoleBillingPage() {
     <div className="mx-auto max-w-4xl space-y-5 p-6">
       {/* Subscription plans (3 cards) — 主要支付入口 */}
       <SubscriptionPlans currentPlan={currentPlan} activeSubs={activeSubs} />
+
+      {/* Wallet pay-as-you-go (跟订阅互补) */}
+      {userId && (
+        <WalletTopup
+          balanceCents={walletBalanceCents}
+          monthlySpendCents={walletSpendCents}
+        />
+      )}
 
       {/* Refund policy */}
       <section className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">

@@ -9,6 +9,7 @@ import {
   getUserPlan,
 } from "@/lib/subscription";
 import { readSetting } from "@/lib/system-settings";
+import { getBalance } from "@/lib/wallet";
 
 /**
  * M2 mirror · 月配额 + 订阅级 limit。
@@ -38,6 +39,16 @@ export interface QuotaStatus {
   isPaid: boolean;
   /** 用户当前生效的 plan（free/plus/pro/legacy_lifetime）。 */
   plan: EffectivePlan;
+  /**
+   * 本次允许的资金来源：
+   *   'quota'     → 走 free/plus 月配额（incUsageCounter）
+   *   'wallet'    → 配额耗尽走钱包余额（consume cost_cny）
+   *   'unlimited' → Pro / legacy_lifetime 无限次（不计费）
+   *   undefined   → allowed=false 时不需要
+   */
+  source?: "quota" | "wallet" | "unlimited";
+  /** allowed=true via wallet 时，当前余额（cents），供 UI 显示。 */
+  walletBalanceCents?: number;
 }
 
 function currentMonthYmd(): string {
@@ -53,6 +64,7 @@ function unlimitedStatus(plan: EffectivePlan): QuotaStatus {
     remaining: Infinity,
     isPaid: plan === "pro" || plan === "legacy_lifetime",
     plan,
+    source: "unlimited",
   };
 }
 
@@ -90,6 +102,7 @@ export async function checkQuota(
       remaining: Infinity,
       isPaid: false,
       plan: "free",
+      source: "unlimited",
     };
   }
 
@@ -116,13 +129,43 @@ export async function checkQuota(
   const used = counter?.usedN ?? 0;
   const remaining = Math.max(0, limit - used);
 
+  // 配额未耗尽 → 走 quota 计数路径
+  if (used < limit) {
+    return {
+      allowed: true,
+      limit,
+      used,
+      remaining,
+      isPaid: false,
+      plan,
+      source: "quota",
+    };
+  }
+
+  // 配额耗尽 → 降级查钱包。余额 > 0 就放行，AI route 成功后扣 cost_cny
+  const walletBalanceCents = await getBalance(userId);
+  if (walletBalanceCents > 0) {
+    return {
+      allowed: true,
+      limit,
+      used,
+      remaining: 0,
+      isPaid: false,
+      plan,
+      source: "wallet",
+      walletBalanceCents,
+    };
+  }
+
+  // 配额耗尽 + 钱包余额 0 → 阻止
   return {
-    allowed: used < limit,
+    allowed: false,
     limit,
     used,
-    remaining,
+    remaining: 0,
     isPaid: false,
     plan,
+    walletBalanceCents,
   };
 }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { emitAiUsage, incUsageCounter } from "@/lib/ai-usage";
+import { emitAiUsage } from "@/lib/ai-usage";
 import {
   assertOfficialEndpoint,
   markChannelError,
@@ -9,6 +9,7 @@ import {
   resolveChannel,
   type ResolvedChannel,
 } from "@/lib/anthropic";
+import { chargeUsage } from "@/lib/charge";
 import { bannedTermsQuoted } from "@/lib/compliance";
 import { courses, knowledgePoints } from "@/lib/db";
 import { assertNotMaintenance } from "@/lib/maintenance";
@@ -185,7 +186,14 @@ export async function POST(req: NextRequest) {
       promptTokens: response.usage?.input_tokens ?? null,
       completionTokens: response.usage?.output_tokens ?? null,
     });
-    if (userIdForLog) void incUsageCounter(userIdForLog, "extract");
+    void chargeUsage({
+      userId: userIdForLog,
+      quotaSource: quota.source,
+      kind: "extract",
+      model: response.model,
+      promptTokens: response.usage?.input_tokens ?? null,
+      completionTokens: response.usage?.output_tokens ?? null,
+    });
 
     const textBlock = response.content.find(
       (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",

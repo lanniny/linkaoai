@@ -39,14 +39,14 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const { purchase_type, subject, channel, notes } = parsed.data;
+  const { purchase_type, subject, channel, notes, amount_cny } = parsed.data;
 
   // 按 purchase_type 计算金额 + 决定 payments 行的 subject / plan 字段。
-  // payments.subject 字段双语义：单科购买填学科名，订阅填 plan 名（plus/pro），
-  // 这样 admin/orders 页 + billing/history 不改也能显示"Pro 订阅"作为一行。
+  // payments.subject 字段多语义：单科购买填学科名，订阅填 plan 名，钱包充值
+  // 填"钱包充值 ¥X"。admin/orders 页直接读 subject 显示，不用改。
   let amountCny: number;
   let subjectField: string;
-  let planField: "plus" | "pro" | null;
+  let planField: "plus" | "pro" | "wallet" | null;
   let periodDaysField: number | null;
 
   if (purchase_type === "single_subject") {
@@ -66,12 +66,19 @@ export async function POST(req: NextRequest) {
     subjectField = "Pro 月订阅";
     planField = "pro";
     periodDaysField = 30;
-  } else {
-    // pro_yearly — ¥199 + 365 天，含挂科退款政策
+  } else if (purchase_type === "pro_yearly") {
+    // ¥199 + 365 天，含挂科退款政策
     amountCny = PLAN_YEARLY_PRICE_CNY.pro;
     subjectField = "Pro 年订阅";
     planField = "pro";
     periodDaysField = 365;
+  } else {
+    // wallet_topup — pay-as-you-go 充值
+    // amount_cny 由 schema.refine 保证非空
+    amountCny = amount_cny!;
+    subjectField = `钱包充值 ¥${amountCny.toFixed(2)}`;
+    planField = "wallet";
+    periodDaysField = null;
   }
 
   try {
