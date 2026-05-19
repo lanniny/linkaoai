@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db, payments } from "@/lib/db";
 import { getPersistContext } from "@/lib/persistence";
-import { PLAN_PRICE_CNY } from "@/lib/subscription";
+import { PLAN_PRICE_CNY, PLAN_YEARLY_PRICE_CNY } from "@/lib/subscription";
 import { readSetting } from "@/lib/system-settings";
 import { paymentIntentRequestSchema } from "@/lib/types";
 
@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
   let amountCny: number;
   let subjectField: string;
   let planField: "plus" | "pro" | null;
+  let periodDaysField: number | null;
 
   if (purchase_type === "single_subject") {
     // subject 由 schema.refine 保证非空
@@ -54,15 +55,23 @@ export async function POST(req: NextRequest) {
     amountCny = Number(pricing[subject!]) || DEFAULT_SUBJECT_AMOUNT_CNY;
     subjectField = subject!;
     planField = null;
+    periodDaysField = null;
   } else if (purchase_type === "plus_monthly") {
     amountCny = PLAN_PRICE_CNY.plus;
     subjectField = "Plus 月订阅";
     planField = "plus";
-  } else {
-    // pro_monthly
+    periodDaysField = 30;
+  } else if (purchase_type === "pro_monthly") {
     amountCny = PLAN_PRICE_CNY.pro;
     subjectField = "Pro 月订阅";
     planField = "pro";
+    periodDaysField = 30;
+  } else {
+    // pro_yearly — ¥199 + 365 天，含挂科退款政策
+    amountCny = PLAN_YEARLY_PRICE_CNY.pro;
+    subjectField = "Pro 年订阅";
+    planField = "pro";
+    periodDaysField = 365;
   }
 
   try {
@@ -75,6 +84,7 @@ export async function POST(req: NextRequest) {
         channel,
         status: "pending",
         plan: planField,
+        periodDays: periodDaysField,
         notes: notes ?? null,
       })
       .returning({
@@ -84,6 +94,7 @@ export async function POST(req: NextRequest) {
         channel: payments.channel,
         status: payments.status,
         plan: payments.plan,
+        periodDays: payments.periodDays,
         createdAt: payments.createdAt,
       });
 

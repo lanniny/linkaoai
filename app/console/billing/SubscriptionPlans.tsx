@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Crown, Sparkles, Zap } from "lucide-react";
+import { Check, Crown, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +16,9 @@ interface Props {
   currentPlan: EffectivePlan;
   activeSubs: ActiveSubscription[];
 }
+
+/** Pro 的月付/年付选择 — Plus 入门档不引导年付（学生现金流敏感）。 */
+type ProCycle = "monthly" | "yearly";
 
 function fmtDate(ms: number): string {
   const d = new Date(ms);
@@ -65,10 +68,14 @@ const PLAN_META = {
       "模拟卷优先使用 Opus 模型",
       "90 天历史记录保留",
       "所有学科解锁",
-      "挂科退款政策（年付）",
+      "挂科退款政策（仅年付）",
     ],
   },
 } as const;
+
+/** Pro 年付价格 — 跟 lib/subscription.ts PLAN_YEARLY_PRICE_CNY.pro 保持一致。 */
+const PRO_YEARLY_PRICE = "¥199";
+const PRO_YEARLY_SAVE_PCT = 17; // 199 / (19.9 * 12) ≈ 0.834 → 节省约 17%
 
 const TONES = {
   zinc: {
@@ -99,6 +106,8 @@ const TONES = {
 
 export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
   const [pendingPlan, setPendingPlan] = useState<"plus" | "pro" | null>(null);
+  // Pro 月/年切换 — 默认年付（先呈现节省 17% 的价格锚点）
+  const [proCycle, setProCycle] = useState<ProCycle>("yearly");
 
   // 找当前 active 同 plan 行的 period_end，用于显示"距过期 N 天"
   const subByPlan: Record<"plus" | "pro", ActiveSubscription | undefined> = {
@@ -109,12 +118,19 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
   async function handleSubscribe(plan: "plus" | "pro") {
     setPendingPlan(plan);
     try {
+      // Plus 只支持月付；Pro 按 proCycle 决定月/年
+      const purchaseType =
+        plan === "plus"
+          ? "plus_monthly"
+          : proCycle === "yearly"
+            ? "pro_yearly"
+            : "pro_monthly";
       // 1. 创建 pending payment row
       const intentRes = await fetch("/api/payment/intent", {
         method: "POST",
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({
-          purchase_type: `${plan}_monthly`,
+          purchase_type: purchaseType,
           channel: "epay_alipay",
         }),
       });
@@ -144,7 +160,9 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
         return;
       }
 
-      toast("跳转到支付页…", { description: "支付完成会返回 /pay" });
+      toast("跳转到支付页…", {
+        description: "支付完成会返回 /console/billing/history",
+      });
       // location.assign() instead of href= to satisfy react-hooks/immutability
       window.location.assign(epayData.payment_url as string);
     } catch (err) {
@@ -220,10 +238,49 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
                 )}
               </div>
               <h3 className="mt-3 text-base font-semibold">{meta.name}</h3>
-              <div className="mt-1 flex items-baseline gap-1">
-                <span className="text-2xl font-bold tracking-tight">{meta.price}</span>
-                <span className="text-xs text-zinc-500">{meta.cadence}</span>
-              </div>
+
+              {/* Pro card 显示月/年价格 — 年付默认选中，节省百分比作锚点 */}
+              {p === "pro" ? (
+                <>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-2xl font-bold tracking-tight">
+                      {proCycle === "yearly" ? PRO_YEARLY_PRICE : meta.price}
+                    </span>
+                    <span className="text-xs text-zinc-500">
+                      {proCycle === "yearly" ? "/年" : "/月"}
+                    </span>
+                    {proCycle === "yearly" && (
+                      <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                        省 {PRO_YEARLY_SAVE_PCT}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 inline-flex rounded-lg border border-emerald-200 bg-white p-0.5 text-[10px]">
+                    {(["monthly", "yearly"] as const).map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setProCycle(c)}
+                        className={`rounded px-2 py-1 transition ${
+                          proCycle === c
+                            ? "bg-emerald-700 text-white"
+                            : "text-zinc-600 hover:bg-emerald-50"
+                        }`}
+                      >
+                        {c === "monthly" ? "月付 ¥19.9" : `年付 ${PRO_YEARLY_PRICE}`}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="text-2xl font-bold tracking-tight">
+                    {meta.price}
+                  </span>
+                  <span className="text-xs text-zinc-500">{meta.cadence}</span>
+                </div>
+              )}
+
               <ul className="mt-3 space-y-1.5 text-xs text-zinc-700">
                 {meta.features.map((f) => (
                   <li key={f} className="flex items-start gap-1.5">
@@ -232,6 +289,15 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
                   </li>
                 ))}
               </ul>
+
+              {/* Pro 年付的挂科退款 nudge */}
+              {p === "pro" && proCycle === "yearly" && !isLegacy && (
+                <p className="mt-2 flex items-start gap-1 text-[10px] text-emerald-800">
+                  <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0" />
+                  年付适用挂科退款政策（完成 ≥ 80% 冲刺任务后挂科可申请）
+                </p>
+              )}
+
               <div className="mt-4">
                 {p === "free" ? (
                   <button
@@ -253,8 +319,12 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
                       : isLegacy
                         ? "已是 Pro 等同权益"
                         : subRow
-                          ? `续费 +30 天（${meta.price}）`
-                          : `订阅 ${meta.name}（${meta.price}/月）`}
+                          ? p === "pro" && proCycle === "yearly"
+                            ? `续费 +365 天（${PRO_YEARLY_PRICE}）`
+                            : `续费 +30 天（${meta.price}）`
+                          : p === "pro" && proCycle === "yearly"
+                            ? `订阅 Pro 年卡（${PRO_YEARLY_PRICE}/年）`
+                            : `订阅 ${meta.name}（${meta.price}/月）`}
                   </button>
                 )}
                 {subRow && (
@@ -269,8 +339,8 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
       </div>
 
       <p className="text-[11px] text-zinc-500">
-        付款 = 一次性 30 天 · 不自动续费 · 到期前一周邮件提醒 · 月卡灵活，不喜
-        欢可以下个月不续
+        Plus / Pro 月付一次性 30 天 · Pro 年付一次性 365 天 · 不自动续费 ·
+        到期前一周邮件提醒 · 月卡灵活，不喜欢可以下个月不续
       </p>
     </section>
   );

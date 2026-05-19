@@ -2,7 +2,6 @@ import { AlertTriangle, ListChecks } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 
-import PayForm from "@/app/pay/PayForm";
 import { auth } from "@/lib/auth";
 import { getUserPlan, listActiveSubscriptions } from "@/lib/subscription";
 
@@ -13,7 +12,6 @@ export const dynamic = "force-dynamic";
 
 export default async function ConsoleBillingPage() {
   const session = await auth.api.getSession({ headers: await headers() });
-  const signedIn = !!session?.user;
   const userId = session?.user?.id ?? null;
 
   // 拿当前 plan + 所有 active 订阅（serializable to client component）
@@ -44,34 +42,22 @@ export default async function ConsoleBillingPage() {
         </h2>
         <ul className="space-y-1.5 pl-1 text-sm text-zinc-700">
           <li>
-            • <strong>退款资格</strong>：完成冲刺计划 ≥ 80% 任务（含日常练习 + 模拟卷）后挂科，凭成绩单截图申请
+            • <strong>退款资格</strong>：Pro 年付用户，完成冲刺计划 ≥ 80%
+            任务（含日常练习 + 模拟卷）后挂科，凭成绩单截图申请
           </li>
           <li>
-            • <strong>退款方式</strong>：原路退回，3 个工作日内到账
+            • <strong>退款方式</strong>：按未使用月份比例原路退回，3 个工作日内到账
           </li>
           <li>
-            • <strong>不适用情况</strong>：任务完成度 &lt; 80%、缺考、单科结业评定后未达申请条件、申请超过出分后 7 天
+            • <strong>不适用情况</strong>：Plus / Pro 月付订阅、任务完成度 &lt; 80%、缺考、
+            单科结业评定后未达申请条件、申请超过出分后 7 天
           </li>
           <li className="text-xs text-amber-800">
-            • <strong>月付订阅</strong>不在挂科退款范围内 — 月付灵活，可随时不续；年付（即将上线）才适用退款政策
+            • <strong>月付灵活原则</strong>：月付不在挂科退款范围内，但你随时可以
+            下个月不续 — 不喜欢就停掉，不会自动扣款
           </li>
         </ul>
       </section>
-
-      {/* Legacy single-subject buy — secondary entry, collapsible */}
-      <details className="group rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <summary className="cursor-pointer text-sm font-semibold">
-          🎯 我只想买一个学科（旧版 19.9 一次性永久买断）
-        </summary>
-        <div className="mt-3 space-y-3 border-t border-zinc-100 pt-3">
-          <p className="text-xs text-zinc-500">
-            如果只想短期搞定一门课，可以选这个：一次付费永久解锁该学科，无月费。
-            但功能跟订阅独立 — 单科永久权益等同 Pro 不限次，但不享受 Plus
-            的「三学科全开」组合优惠。
-          </p>
-          <PayForm signedIn={signedIn} />
-        </div>
-      </details>
 
       <div className="flex justify-end">
         <Link

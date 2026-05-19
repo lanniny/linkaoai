@@ -31,6 +31,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
       status: payments.status,
       userId: payments.userId,
       plan: payments.plan,
+      periodDays: payments.periodDays,
     })
     .from(payments)
     .where(eq(payments.id, id))
@@ -67,6 +68,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         paymentId: id,
         userId: existing.userId,
         plan: existing.plan,
+        periodDays: existing.periodDays ?? undefined,
       });
     }
   } catch (err) {

@@ -295,9 +295,13 @@ export const payments = sqliteTable(
     status: text("status").notNull().default("pending"), // pending | paid | refunded | failed
     // 'plan' 区分本次付款的商品类型：
     //   null → 旧版单科一次性购买（保留兼容；status='paid' 视作永久权益）
-    //   'plus' → Plus 月订阅，notify 时创建 subscriptions 行 +30 天
-    //   'pro' → Pro 月订阅，同上
+    //   'plus' → Plus 月订阅
+    //   'pro' → Pro 月订阅 或 Pro 年订阅（用 period_days 区分）
     plan: text("plan"),
+    // 订阅订单的有效期长度（天）。30 = 月付，365 = 年付，null = 单科一次性
+    // （legacy）或老的订阅行（迁移前默认 30 天）。notify/mark-paid 时这个
+    // 值传给 issueSubscriptionFromPayment 决定 period_end。
+    periodDays: integer("period_days"),
     channel: text("channel").notNull(),
     // wechat_manual | alipay_manual | epay_alipay | epay_wxpay | redemption_code
     notes: text("notes"),

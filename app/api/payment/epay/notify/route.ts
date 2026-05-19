@@ -72,6 +72,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         id: payments.id,
         userId: payments.userId,
         plan: payments.plan,
+        periodDays: payments.periodDays,
       });
 
     // 订阅类付款 → 创建/延期 subscriptions 行（fire-and-forget，失败不阻塞 EPay）
@@ -81,6 +82,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
         paymentId: row.id,
         userId: row.userId,
         plan: row.plan,
+        periodDays: row.periodDays ?? undefined,
       });
     }
   } catch (err) {

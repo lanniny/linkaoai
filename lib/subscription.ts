@@ -49,14 +49,27 @@ export const PLAN_PRICE_CNY: Record<"plus" | "pro", number> = {
   pro: 19.9,
 };
 
+/**
+ * 年付价格。仅 Pro 支持年付 — Plus 是入门档不引导年付（学生现金流敏感）。
+ * 199 / 12 ≈ ¥16.6，月卡 ¥19.9 相比节省约 17%（约两个月免费）。年付用户
+ * 才适用挂科退款政策，做差异化承诺。
+ */
+export const PLAN_YEARLY_PRICE_CNY: Record<"pro", number> = {
+  pro: 199,
+};
+
 export const PLAN_PERIOD_DAYS = 30;
+export const PLAN_YEARLY_PERIOD_DAYS = 365;
 
 /**
  * 付款成功 → 创建/延期一行 active 订阅。三个入口共享：epay/notify、
  * admin mark-paid、redemption/redeem。
  *
- * 续费语义：用户已有同 plan 的 active 行 → period_end += 30 天（延长），不
- * 创建新行；否则新建 active 行 period_start=now / period_end=now+30d。
+ * 续费语义：用户已有同 plan 的 active 行 → period_end += periodDays 天
+ * （延长），不创建新行；否则新建 active 行 period_start=now / period_end=
+ * now+periodDays.
+ *
+ * periodDays 默认 30 天（月付）；Pro 年付传 365。
  *
  * Fire-and-forget：调用方不应该让订阅创建失败阻塞 payment status 更新；
  * 实际错误已 log，下次调用还会幂等延期。
@@ -65,9 +78,11 @@ export async function issueSubscriptionFromPayment(args: {
   paymentId: string;
   userId: string;
   plan: "plus" | "pro";
+  periodDays?: number;
 }): Promise<void> {
   const now = new Date();
-  const periodMs = PLAN_PERIOD_DAYS * 86400_000;
+  const periodDays = args.periodDays ?? PLAN_PERIOD_DAYS;
+  const periodMs = periodDays * 86400_000;
 
   try {
     // 找用户当前同 plan 的 active 行（最长 period_end 那条）

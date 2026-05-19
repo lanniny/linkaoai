@@ -29,10 +29,10 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/pay"
+                  href="/console/billing"
                   className="text-zinc-600 transition hover:text-zinc-900"
                 >
-                  付费 · 退款
+                  订阅 · 退款
                 </Link>
               </li>
               <li>

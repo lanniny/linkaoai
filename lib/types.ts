@@ -184,18 +184,21 @@ export type RedemptionRedeemRequest = z.infer<
 >;
 
 /**
- * Payment intent 接受三种购买类型：
- *   - 'single_subject' (默认 · 向后兼容)：旧版 19.9 单科一次性永久买断
+ * Payment intent 接受四种购买类型：
+ *   - 'single_subject' (legacy · 向后兼容，前端入口已下线但 API 路径保留)：
+ *     旧版 19.9 单科一次性永久买断
  *   - 'plus_monthly'：Plus 月订阅 ¥9.9 / 30 天
  *   - 'pro_monthly'：Pro 月订阅 ¥19.9 / 30 天
+ *   - 'pro_yearly'：Pro 年付 ¥199 / 365 天（约 17% 折扣 + 挂科退款适用）
  *
  * 旧 client 不传 purchase_type 时默认 single_subject + 需要 subject 字段；
- * 订阅 client 传 plus_monthly / pro_monthly 时 subject 可省。
+ * 订阅 client 传 plus_monthly / pro_monthly / pro_yearly 时 subject 可省。
  */
 export const purchaseTypeSchema = z.enum([
   "single_subject",
   "plus_monthly",
   "pro_monthly",
+  "pro_yearly",
 ]);
 export type PurchaseType = z.infer<typeof purchaseTypeSchema>;
 
