@@ -220,35 +220,42 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
         </div>
       )}
 
-      {/* 支付渠道选择 — 影响所有 plan 卡的下单流程 */}
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-zinc-600">支付方式：</span>
-        <div className="inline-flex rounded-lg border border-zinc-300 bg-white p-0.5">
-          <button
-            type="button"
-            onClick={() => setPayChannel("alipay")}
-            disabled={pendingPlan !== null}
-            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
-              payChannel === "alipay"
-                ? "bg-blue-600 text-white"
-                : "text-zinc-600 hover:bg-blue-50"
-            }`}
-          >
-            💙 支付宝
-          </button>
-          <button
-            type="button"
-            onClick={() => setPayChannel("wxpay")}
-            disabled={pendingPlan !== null}
-            className={`rounded px-3 py-1 font-medium transition disabled:opacity-50 ${
-              payChannel === "wxpay"
-                ? "bg-emerald-600 text-white"
-                : "text-zinc-600 hover:bg-emerald-50"
-            }`}
-          >
-            💚 微信
-          </button>
+      {/* 支付渠道选择 — 影响所有 plan 卡的下单流程；放显眼位置 */}
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-medium text-zinc-700">
+            选择支付方式
+          </span>
+          <div className="inline-flex rounded-lg border border-zinc-300 bg-zinc-50 p-1 text-sm">
+            <button
+              type="button"
+              onClick={() => setPayChannel("alipay")}
+              disabled={pendingPlan !== null}
+              className={`inline-flex items-center gap-1.5 rounded px-4 py-1.5 font-medium transition disabled:opacity-50 ${
+                payChannel === "alipay"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-zinc-600 hover:bg-blue-50"
+              }`}
+            >
+              💙 支付宝
+            </button>
+            <button
+              type="button"
+              onClick={() => setPayChannel("wxpay")}
+              disabled={pendingPlan !== null}
+              className={`inline-flex items-center gap-1.5 rounded px-4 py-1.5 font-medium transition disabled:opacity-50 ${
+                payChannel === "wxpay"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-zinc-600 hover:bg-emerald-50"
+              }`}
+            >
+              💚 微信
+            </button>
+          </div>
         </div>
+        <p className="mt-1.5 text-[11px] text-zinc-500">
+          下方任一订阅按钮都将使用所选渠道跳转支付 · 点击下单前可切换
+        </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -340,6 +347,22 @@ export function SubscriptionPlans({ currentPlan, activeSubs }: Props) {
               )}
 
               <div className="mt-4">
+                {/* 付款渠道提示 — 让用户在按钮上方明确看到将用哪种 */}
+                {p !== "free" && !isLegacy && (
+                  <p className="mb-1.5 text-center text-[10px] text-zinc-500">
+                    将用{" "}
+                    <span
+                      className={`font-medium ${
+                        payChannel === "alipay"
+                          ? "text-blue-700"
+                          : "text-emerald-700"
+                      }`}
+                    >
+                      {payChannel === "alipay" ? "💙 支付宝" : "💚 微信"}
+                    </span>{" "}
+                    付款
+                  </p>
+                )}
                 {p === "free" ? (
                   <button
                     type="button"
